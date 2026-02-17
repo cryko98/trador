@@ -8,10 +8,8 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [react()],
     define: {
-      // Map VITE_API_KEY (from Vercel) or API_KEY (local) to process.env.API_KEY
-      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY),
-      // Handle legacy process.env usage if necessary
-      'process.env': {}
+      // Prioritize VITE_API_KEY (Vercel standard) -> process.env.API_KEY (Code requirement)
+      'process.env.API_KEY': JSON.stringify(env.VITE_API_KEY || env.API_KEY || '')
     }
   };
 });
