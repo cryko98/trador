@@ -808,7 +808,7 @@ const App: React.FC = () => {
                     <div className="flex-1 bg-black relative overflow-hidden">
                       {/* REAL DEXSCREENER CHART */}
                       <iframe 
-                        src={`https://dexscreener.com/solana/${token.metadata.address}?embed=1&theme=dark`}
+                        src={`https://dexscreener.com/solana/${token.metadata.address}?embed=1&theme=dark&trades=0&info=0`}
                         className="w-full h-full grayscale-[0.3] hover:grayscale-0 transition-all duration-500"
                         title="DexScreener"
                         frameBorder="0"
