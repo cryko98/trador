@@ -28,6 +28,7 @@ export interface TokenMetadata {
   mcap: number;
   liquidity: number;
   volume24h: number;
+  priceChange24h: number;
 }
 
 export interface ActiveTokenState {

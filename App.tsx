@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown
 } from 'lucide-react';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -297,6 +297,10 @@ const App: React.FC = () => {
      return `$${v.toFixed(0)}`;
   };
 
+  const formattedChange = (c: number) => {
+    return `${c > 0 ? '+' : ''}${c.toFixed(2)}%`;
+  };
+
   return (
     <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
       
@@ -419,7 +423,7 @@ const App: React.FC = () => {
                    {autoMode ? (
                      <>
                       <h2 className="text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
-                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Volume Targets (&gt;250k)...</p>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets (&gt;6h Age)...</p>
                      </>
                    ) : (
                      <>
@@ -434,7 +438,7 @@ const App: React.FC = () => {
                     <div className="h-10 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-4">
                       <div className="flex items-center gap-2 text-[#00FFA3]">
                          <Radar size={14} className={isScanning ? "animate-spin" : ""} />
-                         <span className="text-[10px] font-black uppercase tracking-widest">High Volume Scan</span>
+                         <span className="text-[10px] font-black uppercase tracking-widest">Smart Swing Scan</span>
                       </div>
                       <button onClick={handleScanMarkets} className="text-slate-500 hover:text-white transition-colors">
                         <Radar size={12} className={isScanning ? "animate-spin" : ""} />
@@ -445,7 +449,7 @@ const App: React.FC = () => {
                       {isScanning ? (
                         <div className="flex flex-col items-center justify-center h-40 gap-3">
                           <div className="w-8 h-8 border-2 border-[#00FFA3] border-t-transparent rounded-full animate-spin"></div>
-                          <span className="text-[10px] text-slate-500 uppercase animate-pulse">Scanning Volume...</span>
+                          <span className="text-[10px] text-slate-500 uppercase animate-pulse">Filtering Noise...</span>
                         </div>
                       ) : scannerResults.length > 0 ? (
                         <div className="grid grid-cols-1 gap-2">
@@ -466,11 +470,16 @@ const App: React.FC = () => {
                                   </div>
                                 </div>
                                 <div className="flex flex-col items-end">
-                                    <div className="flex items-center gap-1 text-[#00FFA3]">
-                                        <BarChart3 size={10} />
-                                        <span className="text-[10px] font-black">{formattedVol(token.volume24h)}</span>
+                                    <div className="flex items-center gap-2">
+                                      <div className={`flex items-center gap-1 ${token.priceChange24h >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
+                                          {token.priceChange24h >= 0 ? <TrendingUp size={10} /> : <TrendingDown size={10} />}
+                                          <span className="text-[10px] font-black">{formattedChange(token.priceChange24h)}</span>
+                                      </div>
+                                      <div className="flex items-center gap-1 text-slate-400">
+                                          <BarChart3 size={10} />
+                                          <span className="text-[10px] font-bold">{formattedVol(token.volume24h)}</span>
+                                      </div>
                                     </div>
-                                    <span className="text-[8px] text-slate-600 uppercase">24h Vol</span>
                                 </div>
                              </div>
                            ))}
@@ -478,7 +487,7 @@ const App: React.FC = () => {
                       ) : (
                         <div className="flex flex-col items-center justify-center h-40 text-slate-600">
                           <p className="text-[10px] uppercase tracking-wider mb-4">
-                            {autoMode ? "Scanning..." : "No High-Vol Targets"}
+                            {autoMode ? "Scanning..." : "No Quality Targets"}
                           </p>
                         </div>
                       )}
@@ -504,8 +513,9 @@ const App: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black text-white">{token.metadata.symbol}</span>
                         <span className="text-[8px] text-[#00FFA3] font-black">{formattedMcap(token.currentMcap)}</span>
-                         <span className="text-[8px] text-slate-500 flex items-center gap-0.5 border-l border-slate-700 pl-2 ml-1">
-                            <BarChart3 size={8} /> {formattedVol(token.metadata.volume24h)}
+                         <span className={`text-[8px] flex items-center gap-0.5 border-l border-slate-700 pl-2 ml-1 ${token.metadata.priceChange24h >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
+                            {token.metadata.priceChange24h >= 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
+                            {formattedChange(token.metadata.priceChange24h)}
                          </span>
                       </div>
                       <div className="flex items-center gap-3">
