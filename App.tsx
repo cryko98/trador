@@ -69,18 +69,25 @@ const App: React.FC = () => {
   useEffect(() => { walletRef.current = wallet; }, [wallet]);
   useEffect(() => { budgetRef.current = tradeBudget; }, [tradeBudget]);
 
-  // Fetch Real Balance Logic
+  // Fetch Real Balance Logic - Fixed Dependency on publicKey
   useEffect(() => {
-    if (wallet.connected && wallet.publicKey) {
+    if (wallet.publicKey) {
         const fetchBalance = async () => {
-            const bal = await connection.getBalance(wallet.publicKey!);
-            setRealWalletBalance(bal / LAMPORTS_PER_SOL);
+            try {
+                const bal = await connection.getBalance(wallet.publicKey!);
+                setRealWalletBalance(bal / LAMPORTS_PER_SOL);
+            } catch (err) {
+                console.error("Failed to fetch balance:", err);
+            }
         };
         fetchBalance();
-        const interval = setInterval(fetchBalance, 10000);
+        // Refresh faster (every 5s) to keep UI snappy
+        const interval = setInterval(fetchBalance, 5000);
         return () => clearInterval(interval);
+    } else {
+        setRealWalletBalance(0);
     }
-  }, [wallet.connected, connection]);
+  }, [wallet.publicKey, connection]);
 
   // Persist State
   useEffect(() => {
@@ -530,19 +537,31 @@ const App: React.FC = () => {
 
            <div className="h-6 w-[1px] bg-slate-800"></div>
 
-           {/* Budget Input */}
+           {/* Budget Input with Max Button */}
            <div className="flex flex-col items-start gap-1">
              <span className="text-[8px] text-slate-500 font-bold uppercase">Trade Budget</span>
-             <div className="flex items-center gap-2">
+             <div className="flex items-center gap-1 bg-slate-900 rounded border border-slate-700 p-0.5">
                <input 
                  type="number" 
-                 min="0.1" 
+                 min="0.01" 
                  step="0.1"
                  value={tradeBudget} 
-                 onChange={(e) => setTradeBudget(parseFloat(e.target.value))}
-                 className="w-16 bg-slate-900 border border-slate-700 text-white text-[10px] px-2 py-1 rounded outline-none focus:border-[#00FFA3]"
+                 onChange={(e) => setTradeBudget(parseFloat(e.target.value) || 0)}
+                 className="w-12 bg-transparent text-white text-[10px] px-1 outline-none font-mono text-right"
                />
-               <span className="text-[10px] text-slate-400">SOL</span>
+               <span className="text-[8px] text-slate-500 font-bold pr-1">SOL</span>
+               <button 
+                 onClick={() => {
+                    if(liveMode && realWalletBalance > 0.02) {
+                        setTradeBudget(parseFloat((realWalletBalance - 0.01).toFixed(3)));
+                    } else if (!liveMode) {
+                        setTradeBudget(10);
+                    }
+                 }}
+                 className="px-1.5 py-0.5 bg-slate-800 hover:bg-[#00FFA3] hover:text-black text-[8px] rounded text-slate-400 font-bold transition-colors"
+               >
+                 MAX
+               </button>
              </div>
            </div>
         </div>
