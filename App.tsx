@@ -1,10 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  AlertCircle, Search, Wallet, Terminal, Activity, Zap, Cpu, 
-  ArrowUpCircle, ArrowDownCircle, BarChart3, Target, ShieldCheck, 
-  Flame, ExternalLink, ChevronRight, TrendingUp, TrendingDown, 
-  BarChart, Layers, History as HistoryIcon, XCircle, Grid
+  Search, Wallet, History as HistoryIcon, XCircle
 } from 'lucide-react';
 import { fetchTokenData } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -89,6 +86,7 @@ const App: React.FC = () => {
   const deployToken = async (targetCa: string) => {
     if (!targetCa || targetCa.trim().length < 32) {
       setInputError('Invalid CA');
+      setTimeout(() => setInputError(''), 3000);
       return;
     }
     if (state.activeTokens[targetCa]) return;
@@ -96,6 +94,7 @@ const App: React.FC = () => {
     const data = await fetchTokenData(targetCa);
     if (!data) {
       setInputError('Token not found');
+      setTimeout(() => setInputError(''), 3000);
       return;
     }
 
@@ -231,8 +230,18 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden">
+    <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
       
+      {/* Error Toast */}
+      {inputError && (
+        <div className="fixed top-20 right-6 z-50 animate-bounce">
+           <div className="bg-rose-950/90 border border-rose-500 text-rose-200 px-4 py-2 rounded shadow-lg text-xs font-mono flex items-center gap-2">
+              <XCircle size={14} />
+              {inputError}
+           </div>
+        </div>
+      )}
+
       {/* Dynamic Navigation */}
       <nav className="h-16 border-b border-slate-800/60 bg-[#0d1117]/95 backdrop-blur-xl flex items-center justify-between px-6 z-50">
         <div className="flex items-center gap-6">
