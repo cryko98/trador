@@ -316,27 +316,38 @@ const App: React.FC = () => {
         const candidates = await fetchTrendingSolanaTokens();
         const available = candidates.filter(c => !stateRef.current.activeTokens[c.address]);
 
+        // Enhanced Scoring Logic for "High Txns & Volume"
         const scoredCandidates = available.map(token => {
            let score = 0;
+           
+           const txns = (token.txns24h?.buys || 0) + (token.txns24h?.sells || 0);
+           const vol = token.volume24h || 0;
+           
+           // Massive Weight for High Activity
+           if (txns > 1500) score += 50;
+           else if (txns > 800) score += 30;
+           else if (txns > 300) score += 10;
+           
+           // Weight for High Volume
+           if (vol > 100000) score += 20;
+           else if (vol > 50000) score += 10;
+
+           // Bonus for being "Fresh but Active" (New Pairs)
+           const age = token.ageHours || 0.1;
+           if (age < 6 && txns > 500) score += 20; // < 6 hours old with high txns
+
+           // Price momentum check
            const p1h = token.priceChange1h || 0;
-           if (p1h > 0 && p1h < 15) score += 35;       
-           else if (p1h >= 15 && p1h < 50) score += 20; 
-           else if (p1h >= 50) score -= 10;
-           else if (p1h >= -5 && p1h <= 0) score += 10;
-           else if (p1h < -5) score -= 50;
+           if (p1h > 0 && p1h < 20) score += 15;       
+           else if (p1h >= 20) score += 5; // Too much pump might be top
+           else if (p1h < -5) score -= 20;
 
            const buys = token.txns24h?.buys || 0;
            const sells = token.txns24h?.sells || 0;
            const total = buys + sells;
            const buyRatio = total > 0 ? buys / total : 0.5;
            
-           if (buyRatio > 0.60) score += 30;      
-           else if (buyRatio > 0.50) score += 10; 
-           else score -= 10; 
-
-           const age = token.ageHours || 0.1; 
-           if (age < 24) score += 25;       
-           else if (age < 72) score += 10;
+           if (buyRatio > 0.55) score += 10;      
 
            return { token, score };
         });
@@ -344,7 +355,8 @@ const App: React.FC = () => {
         scoredCandidates.sort((a, b) => b.score - a.score);
         const bestMatch = scoredCandidates[0];
         
-        if (bestMatch && bestMatch.score > -20) {
+        // Auto-deploy if score is decent
+        if (bestMatch && bestMatch.score > 20) {
           await deployToken(bestMatch.token.address);
         }
       }
