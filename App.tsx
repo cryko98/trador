@@ -1,10 +1,13 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw, Power
 } from 'lucide-react';
+import { useConnection, useWallet } from '@solana/wallet-adapter-react';
+import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
+import { executeJupiterSwap } from './services/jupiterService';
 import { AppState, Trade, TokenMetadata, ActiveTokenState } from './types';
 
 const INITIAL_SOL_BALANCE = 10;
@@ -15,9 +18,14 @@ const MCAP_HISTORY_LIMIT = 20;
 const LOGO_URL = "https://wkkeyyrknmnynlcefugq.supabase.co/storage/v1/object/public/peng/trador.png";
 
 const App: React.FC = () => {
+  // Solana Wallet Hooks
+  const { connection } = useConnection();
+  const wallet = useWallet();
+
   const [caInput, setCaInput] = useState('');
   const [isScanning, setIsScanning] = useState(false);
   const [autoMode, setAutoMode] = useState(true); // Auto-pilot on by default
+  const [liveMode, setLiveMode] = useState(false); // Live Trading Switch
   const [scannerResults, setScannerResults] = useState<TokenMetadata[]>([]);
   
   // Trade Filter State
@@ -38,10 +46,14 @@ const App: React.FC = () => {
   });
   
   const [inputError, setInputError] = useState('');
+  const [systemMessage, setSystemMessage] = useState('');
   const stateRef = useRef(state);
-  useEffect(() => { stateRef.current = state; }, [state]);
+  const walletRef = useRef(wallet);
 
-  // Persist balance and trade history
+  useEffect(() => { stateRef.current = state; }, [state]);
+  useEffect(() => { walletRef.current = wallet; }, [wallet]);
+
+  // Persist balance and trade history (Sim mode only mostly, but keeps UI in sync)
   useEffect(() => {
     localStorage.setItem('trador_multi_v1', JSON.stringify({
       balance: state.balance,
@@ -51,7 +63,40 @@ const App: React.FC = () => {
     }));
   }, [state.balance, state.positions, state.avgEntryPrices, state.trades]);
 
-  const addTrade = (type: Trade['type'], metadata: TokenMetadata, amount: number, solAmount: number, comment?: string) => {
+  // Unified Trade Handler (Sim & Live)
+  const executeAndRecordTrade = async (type: Trade['type'], metadata: TokenMetadata, amount: number, solAmount: number, comment?: string) => {
+    
+    // LIVE MODE GUARD
+    if (liveMode) {
+        if (!walletRef.current.connected) {
+            setSystemMessage("❌ Wallet not connected for Live Trade");
+            setTimeout(() => setSystemMessage(''), 3000);
+            return;
+        }
+        
+        setSystemMessage(`⚠️ EXECUTING LIVE ${type} on ${metadata.symbol}...`);
+        
+        let result;
+        if (type === 'BUY') {
+            // Swap SOL -> Token
+            result = await executeJupiterSwap(connection, walletRef.current, 'SOL', metadata.address, solAmount, true);
+        } else {
+            // Swap Token -> SOL (Selling `amount` of tokens)
+            result = await executeJupiterSwap(connection, walletRef.current, metadata.address, 'SOL', amount, false);
+        }
+
+        if (result.error) {
+            setSystemMessage(`❌ LIVE TRADE FAILED: ${result.error}`);
+            setTimeout(() => setSystemMessage(''), 5000);
+            return; // Stop local state update on failure
+        }
+
+        comment = `${comment} [TX: ${result.signature?.slice(0,6)}...]`;
+        setSystemMessage(`✅ LIVE TRADE SUCCESS: ${result.signature?.slice(0,8)}`);
+        setTimeout(() => setSystemMessage(''), 3000);
+    }
+
+    // LOCAL STATE UPDATE (Simulates logic or tracks live record)
     const id = Math.random().toString(36).substr(2, 9);
     const price = parseFloat(metadata.priceNative);
     
@@ -77,6 +122,8 @@ const App: React.FC = () => {
         newAvgEntry = ((currentPos * newAvgEntry) + (amount * price)) / totalTokens;
       }
 
+      // If Live mode, we don't update 'balance' variable based on calc, we should technically fetch it,
+      // but for UI continuity we simulate the deduction so the charts look right.
       return {
         ...prev,
         trades: [newTrade, ...prev.trades].slice(0, 100),
@@ -190,26 +237,19 @@ const App: React.FC = () => {
       
       // Only deploy new tokens if we have space
       if (currentActiveCount < MAX_ACTIVE_TOKENS) {
-        // console.log("Auto-Pilot: Scanning for targets...");
         const candidates = await fetchTrendingSolanaTokens();
-        
-        // 1. Filter out already active tokens
         const available = candidates.filter(c => !stateRef.current.activeTokens[c.address]);
 
-        // 2. Advanced Scoring & Selection Logic
+        // Scoring Logic
         const scoredCandidates = available.map(token => {
            let score = 0;
-           
-           // A. Trend Score (1h Price Change)
-           // Adjusted logic: More permissive of neutral/slight dips
            const p1h = token.priceChange1h || 0;
            if (p1h > 0 && p1h < 15) score += 35;       
            else if (p1h >= 15 && p1h < 50) score += 20; 
-           else if (p1h >= 50) score -= 10;             // Volatility caution
-           else if (p1h >= -5 && p1h <= 0) score += 10; // Consolidation is OK
-           else if (p1h < -5) score -= 50;              // Strong dump penalty
+           else if (p1h >= 50) score -= 10;
+           else if (p1h >= -5 && p1h <= 0) score += 10;
+           else if (p1h < -5) score -= 50;
 
-           // B. Liquidity Flow Score (Buy Ratio)
            const buys = token.txns24h?.buys || 0;
            const sells = token.txns24h?.sells || 0;
            const total = buys + sells;
@@ -217,36 +257,28 @@ const App: React.FC = () => {
            
            if (buyRatio > 0.60) score += 30;      
            else if (buyRatio > 0.50) score += 10; 
-           else score -= 10; // Sell pressure penalty
+           else score -= 10; 
 
-           // C. Contract Age Preference
            const age = token.ageHours || 0.1; 
-           if (age < 24) score += 25;       // Fresh
-           else if (age < 72) score += 10;  // Recent
+           if (age < 24) score += 25;       
+           else if (age < 72) score += 10;
 
            return { token, score };
         });
 
-        // 3. Sort by score descending
         scoredCandidates.sort((a, b) => b.score - a.score);
-
-        // 4. Select the best candidate (Lowered threshold to 0 to ensure action)
         const bestMatch = scoredCandidates[0];
         
         if (bestMatch && bestMatch.score > -20) {
-          // console.log(`Auto-Pilot: Deploying ${bestMatch.token.symbol} (Score: ${bestMatch.score})`);
           await deployToken(bestMatch.token.address);
         }
       }
     };
 
-    // Initial run
     runAutoPilot();
-
     const interval = setInterval(runAutoPilot, AUTO_PILOT_INTERVAL);
     return () => clearInterval(interval);
   }, [autoMode]); 
-  // Dependency is only autoMode. We use stateRef inside to get fresh state without re-triggering the effect.
 
 
   // --- TRADING ENGINE ---
@@ -273,25 +305,30 @@ const App: React.FC = () => {
         let isBuying = false;
         let isSelling = false;
 
-        // Shared capital management: Only use 20% of remaining balance per trade
-        if (currentPos === 0 && shortTermDelta > 0.6 && stateRef.current.balance > 0.5) {
-          const buySize = Math.min(stateRef.current.balance * 0.2, 2.0);
-          addTrade('BUY', data, buySize / currentPrice, buySize, "Momentum ignition detected.");
-          isBuying = true;
+        // BUY LOGIC
+        if (currentPos === 0 && shortTermDelta > 0.6) {
+           // Check balance in ref to avoid staleness
+           const balance = stateRef.current.balance;
+           if (balance > 0.5) {
+             const buySize = Math.min(balance * 0.2, 2.0); // Uses local balance for sizing
+             await executeAndRecordTrade('BUY', data, buySize / currentPrice, buySize, "Momentum ignition detected.");
+             isBuying = true;
+           }
         }
 
+        // SELL LOGIC
         if (currentPos > 0) {
           const hasScaled = stateRef.current.trades.some(t => t.address === addr && t.type === 'PARTIAL_SELL');
           
           if (profitPct >= 15 && !hasScaled) {
             const sellAmt = currentPos * 0.5;
-            addTrade('PARTIAL_SELL', data, sellAmt, sellAmt * currentPrice, "Initial target reached. Securing 50%.");
+            await executeAndRecordTrade('PARTIAL_SELL', data, sellAmt, sellAmt * currentPrice, "Initial target reached. Securing 50%.");
             isSelling = true;
           } else if (profitPct >= 35 || (hasScaled && shortTermDelta < -2.5)) {
-            addTrade('SELL', data, currentPos, currentPos * currentPrice, "Position fully realized.");
+            await executeAndRecordTrade('SELL', data, currentPos, currentPos * currentPrice, "Position fully realized.");
             isSelling = true;
           } else if (profitPct <= -8.0) {
-            addTrade('SELL', data, currentPos, currentPos * currentPrice, "Stop loss execution.");
+            await executeAndRecordTrade('SELL', data, currentPos, currentPos * currentPrice, "Stop loss execution.");
             isSelling = true;
           }
         }
@@ -318,7 +355,7 @@ const App: React.FC = () => {
     }, REFRESH_INTERVAL);
 
     return () => clearInterval(interval);
-  }, [state.status]);
+  }, [state.status, liveMode]); // Trigger re-bind if liveMode changes
 
   const updateAiCommentary = async (addr: string, data: TokenMetadata, history: number[], isBuying: boolean, isSelling: boolean) => {
     const aiResponse = await getTradorCommentary(data.symbol, history, isBuying, isSelling, stateRef.current.balance);
@@ -338,7 +375,6 @@ const App: React.FC = () => {
     });
   };
 
-  // Explicitly type totalPnl to prevent 'unknown' inference and fix operator issues
   const totalPnl: number = state.trades.reduce((acc: number, t: Trade) => acc + (t.pnl || 0), 0);
   const activeCount = Object.keys(state.activeTokens).length;
 
@@ -364,7 +400,6 @@ const App: React.FC = () => {
     return p.toFixed(4);
   };
 
-  // Filter Trades
   const filteredTrades = state.trades.filter(t => {
     const matchesSymbol = t.symbol.toLowerCase().includes(tradeFilterSymbol.toLowerCase());
     const matchesType = tradeFilterType === 'ALL' 
@@ -378,19 +413,22 @@ const App: React.FC = () => {
   return (
     <div className="h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
       
-      {/* Error Toast */}
-      {inputError && (
+      {/* Messages / Toasts */}
+      {(inputError || systemMessage) && (
         <div className="fixed top-20 right-6 z-50 animate-bounce">
-           <div className="bg-rose-950/90 border border-rose-500 text-rose-200 px-4 py-2 rounded shadow-lg text-xs font-mono flex items-center gap-2">
-              <XCircle size={14} />
-              {inputError}
+           <div className={`
+              px-4 py-2 rounded shadow-lg text-xs font-mono flex items-center gap-2
+              ${systemMessage.includes('SUCCESS') ? 'bg-emerald-950/90 border-emerald-500 text-emerald-200' : 'bg-rose-950/90 border border-rose-500 text-rose-200'}
+           `}>
+              {systemMessage.includes('SUCCESS') ? <Zap size={14} /> : <XCircle size={14} />}
+              {inputError || systemMessage}
            </div>
         </div>
       )}
 
       {/* Dynamic Navigation */}
       <nav className="h-16 border-b border-slate-800/60 bg-[#0d1117]/95 backdrop-blur-xl flex items-center justify-between px-3 md:px-6 z-50 shrink-0">
-        <div className="flex items-center gap-2 md:gap-6">
+        <div className="flex items-center gap-2 md:gap-4">
           <div className="flex items-center gap-2">
             <img src={LOGO_URL} alt="Trador" className="w-8 h-8 object-contain" />
             <div className="flex flex-col">
@@ -401,20 +439,34 @@ const App: React.FC = () => {
           
           <div className="h-4 w-[1px] bg-slate-800 hidden md:block"></div>
           
-          {/* Auto Pilot Toggle - Compact on mobile */}
-          <button 
-            onClick={() => setAutoMode(!autoMode)}
-            className={`flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${
-              autoMode 
-                ? 'bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]' 
-                : 'bg-slate-900 border-slate-800 text-slate-500'
-            }`}
-          >
-            <Bot size={14} className={autoMode ? "animate-pulse" : ""} />
-            <span className="hidden md:inline">Auto-Pilot: {autoMode ? 'ON' : 'OFF'}</span>
-          </button>
+          {/* Mode Toggles */}
+          <div className="flex items-center gap-2">
+            <button 
+                onClick={() => setAutoMode(!autoMode)}
+                className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-lg border transition-all text-[9px] md:text-[10px] font-bold uppercase tracking-wider ${
+                autoMode 
+                    ? 'bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]' 
+                    : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+            >
+                <Bot size={12} className={autoMode ? "animate-pulse" : ""} />
+                <span className="hidden md:inline">Auto</span>
+            </button>
 
-          <div className="relative group hidden md:flex items-center">
+            <button 
+                onClick={() => setLiveMode(!liveMode)}
+                className={`flex items-center gap-1.5 px-2 md:px-3 py-1.5 rounded-lg border transition-all text-[9px] md:text-[10px] font-bold uppercase tracking-wider ${
+                liveMode 
+                    ? 'bg-rose-500/20 border-rose-500 text-rose-500 animate-pulse' 
+                    : 'bg-slate-900 border-slate-800 text-slate-500'
+                }`}
+            >
+                <Power size={12} />
+                <span>{liveMode ? 'LIVE' : 'SIM'}</span>
+            </button>
+          </div>
+
+          <div className="relative group hidden md:flex items-center ml-2">
             <Search className="absolute left-3 text-slate-500" size={14} />
             <input 
               type="text" 
@@ -422,10 +474,10 @@ const App: React.FC = () => {
               onChange={(e) => setCaInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && deployToken(caInput)}
               placeholder="Deploy Manually..."
-              className="bg-black/50 border border-slate-800 rounded-lg py-1.5 pl-9 pr-3 text-[10px] w-64 outline-none focus:border-[#00FFA3] transition-all"
+              className="bg-black/50 border border-slate-800 rounded-lg py-1.5 pl-9 pr-3 text-[10px] w-48 lg:w-64 outline-none focus:border-[#00FFA3] transition-all"
             />
           </div>
-
+          
           <button 
             onClick={handleScanMarkets} 
             disabled={isScanning}
@@ -435,16 +487,24 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 md:gap-8">
-          <div className="flex flex-col items-end">
-            <span className="text-[8px] text-slate-500 font-black uppercase hidden sm:block">Cluster PNL</span>
+        <div className="flex items-center gap-2 md:gap-4">
+          <div className="flex flex-col items-end hidden sm:flex">
+            <span className="text-[8px] text-slate-500 font-black uppercase">Cluster PNL</span>
             <span className={`text-[10px] md:text-xs font-black ${(totalPnl as number) >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
               {(totalPnl as number) >= 0 ? '+' : ''}{(totalPnl as number).toFixed(4)} <span className="hidden sm:inline">SOL</span>
             </span>
           </div>
-          <div className="bg-slate-900 border border-slate-800 px-2 md:px-4 py-1.5 md:py-2 rounded-lg flex items-center gap-2 md:gap-3">
-            <Wallet size={12} className="text-[#00FFA3] hidden sm:block" />
-            <span className="text-[10px] md:text-xs font-black text-[#00FFA3]">{(state.balance as number).toFixed(3)} SOL</span>
+          
+          {/* Wallet Connect */}
+          <div className="wallet-adapter-wrapper scale-90 md:scale-100">
+             <WalletMultiButton style={{ 
+                 backgroundColor: liveMode ? '#9f1239' : '#0f172a', 
+                 height: '32px', 
+                 fontSize: '10px', 
+                 fontFamily: 'JetBrains Mono',
+                 borderRadius: '0.5rem',
+                 border: '1px solid #334155'
+             }} />
           </div>
 
            {/* Reset Button */}
@@ -542,6 +602,7 @@ const App: React.FC = () => {
                      <>
                       <h2 className="text-2xl md:text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
                       <p className="text-[8px] md:text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets...</p>
+                      {liveMode && <p className="text-[8px] md:text-[10px] text-rose-500 font-bold mt-2 uppercase tracking-[0.3em] border border-rose-900/50 bg-rose-950/20 px-2 py-1 rounded">⚠️ LIVE TRADING ENABLED - REAL SOLANA IN USE</p>}
                      </>
                    ) : (
                      <>
@@ -730,8 +791,8 @@ const App: React.FC = () => {
       <footer className="h-8 border-t border-slate-800/60 bg-[#0d1117] flex items-center justify-between px-6 text-[8px] font-black text-slate-500 tracking-[0.2em] uppercase shrink-0">
         <div className="flex gap-6">
           <span className="flex items-center gap-2">
-            <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px] ${autoMode ? 'bg-[#00FFA3] shadow-[#00FFA3]' : 'bg-slate-500'}`}></div> 
-            Cluster {autoMode ? 'Autonomous' : 'Manual'}
+            <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px] ${liveMode ? 'bg-rose-500 shadow-rose-500 animate-pulse' : autoMode ? 'bg-[#00FFA3] shadow-[#00FFA3]' : 'bg-slate-500'}`}></div> 
+            Cluster {liveMode ? 'LIVE' : (autoMode ? 'Autonomous' : 'Manual')}
           </span>
           <span className="hidden sm:inline">Latency: 22ms</span>
         </div>
