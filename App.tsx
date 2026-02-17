@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { 
   History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square, Briefcase
 } from 'lucide-react';
@@ -522,7 +522,6 @@ const App: React.FC = () => {
 
   const formattedMcap = (m: number) => m >= 1000000 ? `$${(m / 1000000).toFixed(2)}M` : m >= 1000 ? `$${(m / 1000).toFixed(2)}K` : `$${m.toFixed(0)}`;
   const formattedChange = (c: number) => `${c > 0 ? '+' : ''}${c.toFixed(2)}%`;
-  const formatPrice = (p: number) => p < 0.000001 ? p.toExponential(2) : p < 0.001 ? p.toFixed(6) : p.toFixed(4);
 
   // Directly use state.trades since filters were removed to clean up code
   const filteredTrades = state.trades;
