@@ -419,7 +419,7 @@ const App: React.FC = () => {
                    {autoMode ? (
                      <>
                       <h2 className="text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
-                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Volume Targets (>250k)...</p>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Volume Targets (&gt;250k)...</p>
                      </>
                    ) : (
                      <>
