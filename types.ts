@@ -39,6 +39,7 @@ export interface ActiveTokenState {
   currentPrice: number;
   currentMcap: number;
   mcapHistory: number[];
+  priceHistory: PricePoint[];
   message: string;
   sentiment: 'BULLISH' | 'NEUTRAL' | 'BEARISH';
   isAiLoading: boolean;

@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
   History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square
 } from 'lucide-react';
@@ -9,14 +9,104 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
 import { executeJupiterSwap } from './services/jupiterService';
-import { AppState, Trade, TokenMetadata, ActiveTokenState } from './types';
+import { AppState, Trade, TokenMetadata, ActiveTokenState, PricePoint } from './types';
 
 const INITIAL_SIM_BALANCE = 10; // Demo Money
 const REFRESH_INTERVAL = 5000;
 const AUTO_PILOT_INTERVAL = 12000; 
 const MAX_ACTIVE_TOKENS = 5; // Max concurrent positions for diversification
-const MCAP_HISTORY_LIMIT = 20;
+const MCAP_HISTORY_LIMIT = 20; // For logic calc
+const CHART_HISTORY_LIMIT = 60; // For visual chart (5 minutes approx)
 const LOGO_URL = "https://wkkeyyrknmnynlcefugq.supabase.co/storage/v1/object/public/peng/trador.png";
+
+// --- CUSTOM CHART COMPONENT ---
+const TokenChart = ({ data, trades }: { data: PricePoint[], trades: Trade[] }) => {
+  if (data.length < 2) return (
+    <div className="w-full h-full flex flex-col items-center justify-center text-xs text-slate-600 bg-black">
+      <div className="flex gap-1 mb-2">
+        {[1,2,3].map(i => <div key={i} className="w-1 h-1 bg-[#00FFA3] rounded-full animate-pulse" style={{animationDelay: `${i*150}ms`}}></div>)}
+      </div>
+      <span>AWAITING MARKET DATA</span>
+    </div>
+  );
+
+  const minPrice = Math.min(...data.map(d => d.price));
+  const maxPrice = Math.max(...data.map(d => d.price));
+  const minTime = data[0].time;
+  const maxTime = data[data.length - 1].time;
+
+  // Add 10% vertical padding
+  const yPadding = (maxPrice - minPrice) * 0.1;
+  const yMin = minPrice - yPadding;
+  const yMax = maxPrice + yPadding;
+  const yRange = yMax - yMin || 0.00000001;
+  const xRange = maxTime - minTime || 1;
+
+  const WIDTH = 1000;
+  const HEIGHT = 500;
+
+  const getX = (t: number) => ((t - minTime) / xRange) * WIDTH;
+  const getY = (p: number) => HEIGHT - ((p - yMin) / yRange) * HEIGHT;
+
+  const points = data.map(d => `${getX(d.time)},${getY(d.price)}`).join(' ');
+  const linePath = `M ${points}`;
+  const areaPath = `${linePath} L ${WIDTH},${HEIGHT} L 0,${HEIGHT} Z`;
+
+  return (
+    <div className="w-full h-full relative bg-black/50 select-none">
+       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full h-full block" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#00FFA3" stopOpacity="0.15"/>
+              <stop offset="100%" stopColor="#00FFA3" stopOpacity="0"/>
+            </linearGradient>
+            <marker id="arrowUp" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+              <path d="M3,0 L6,6 L0,6 Z" fill="#10b981" />
+            </marker>
+            <marker id="arrowDown" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
+               <path d="M0,0 L6,0 L3,6 Z" fill="#f43f5e" />
+            </marker>
+          </defs>
+          
+          {/* Guide Lines */}
+          <line x1="0" y1={getY(data[0].price)} x2={WIDTH} y2={getY(data[0].price)} stroke="#334155" strokeWidth="1" strokeDasharray="4 4" opacity="0.3" />
+
+          {/* Chart Data */}
+          <path d={areaPath} fill="url(#chartGradient)" />
+          <path d={linePath} fill="none" stroke="#00FFA3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
+
+          {/* Trade Markers */}
+          {trades.map(trade => {
+             // Show trades relevant to this chart window
+             if (trade.timestamp < minTime || trade.timestamp > maxTime) return null;
+             
+             const tx = getX(trade.timestamp);
+             const ty = getY(trade.price);
+             const isBuy = trade.type === 'BUY';
+             const color = isBuy ? '#10b981' : '#f43f5e';
+             
+             return (
+               <g key={trade.id} transform={`translate(${tx}, ${ty})`}>
+                 <line y1={0} y2={HEIGHT - ty} stroke={color} strokeWidth="1" strokeDasharray="2 2" opacity="0.5" />
+                 <circle r="4" fill={color} stroke="#000" strokeWidth="1" className="drop-shadow-lg" />
+                 <text 
+                    y={isBuy ? 15 : -10} 
+                    x={0} 
+                    textAnchor="middle" 
+                    fill={color} 
+                    fontSize="16" 
+                    fontWeight="bold" 
+                    fontFamily="monospace"
+                 >
+                    {isBuy ? "B" : "S"}
+                 </text>
+               </g>
+             );
+          })}
+       </svg>
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   // Solana Wallet Hooks
@@ -37,12 +127,21 @@ const App: React.FC = () => {
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('trador_multi_v2');
     const initial = saved ? JSON.parse(saved) : null;
+    
+    // Migration: ensure priceHistory exists on old saves
+    const migratedActiveTokens = initial?.activeTokens ? { ...initial.activeTokens } : {};
+    Object.keys(migratedActiveTokens).forEach(key => {
+        if (!migratedActiveTokens[key].priceHistory) {
+            migratedActiveTokens[key].priceHistory = [];
+        }
+    });
+
     return {
       balance: initial?.balance ?? INITIAL_SIM_BALANCE,
       positions: initial?.positions ?? {},
       avgEntryPrices: initial?.avgEntryPrices ?? {},
       trades: initial?.trades ?? [],
-      activeTokens: {},
+      activeTokens: migratedActiveTokens,
       status: 'IDLE'
     };
   });
@@ -76,9 +175,10 @@ const App: React.FC = () => {
       balance: state.balance,
       positions: state.positions,
       avgEntryPrices: state.avgEntryPrices,
-      trades: state.trades
+      trades: state.trades,
+      activeTokens: state.activeTokens // Persist active token state including price history
     }));
-  }, [state.balance, state.positions, state.avgEntryPrices, state.trades]);
+  }, [state.balance, state.positions, state.avgEntryPrices, state.trades, state.activeTokens]);
 
   // --- EXECUTION ENGINE ---
   const executeAndRecordTrade = async (type: Trade['type'], metadata: TokenMetadata, amount: number, solAmount: number, comment?: string) => {
@@ -93,7 +193,6 @@ const App: React.FC = () => {
         
         // Budget Check for Buys
         if (type === 'BUY') {
-            // A clearer check would be real balance, but let's trust the Swap execution to fail if insufficient funds
             if (solAmount > realWalletBalance) {
                 setSystemMessage("❌ Insufficient Wallet Balance for Trade");
                 return;
@@ -212,6 +311,8 @@ const App: React.FC = () => {
       return;
     }
 
+    const currentPrice = parseFloat(data.priceNative);
+
     setState(prev => ({
       ...prev,
       status: 'TRADING',
@@ -219,9 +320,10 @@ const App: React.FC = () => {
         ...prev.activeTokens,
         [targetCa]: {
           metadata: data!,
-          currentPrice: parseFloat(data!.priceNative),
+          currentPrice: currentPrice,
           currentMcap: data!.mcap,
           mcapHistory: [data!.mcap],
+          priceHistory: [{ time: Date.now(), price: currentPrice }],
           message: "Initiating tactical monitoring...",
           sentiment: 'NEUTRAL',
           isAiLoading: false
@@ -310,12 +412,15 @@ const App: React.FC = () => {
 
         const activeToken = stateRef.current.activeTokens[addr];
         const currentPrice = parseFloat(data.priceNative);
-        const history = [...activeToken.mcapHistory, data.mcap].slice(-MCAP_HISTORY_LIMIT);
+        
+        // Update Histories
+        const mcapHistory = [...activeToken.mcapHistory, data.mcap].slice(-MCAP_HISTORY_LIMIT);
+        const priceHistory = [...(activeToken.priceHistory || []), { time: Date.now(), price: currentPrice }].slice(-CHART_HISTORY_LIMIT);
         
         const currentPos = stateRef.current.positions[addr] || 0;
         const avgEntry = stateRef.current.avgEntryPrices[addr] || 0;
         const profitPct = avgEntry > 0 ? ((currentPrice - avgEntry) / avgEntry) * 100 : 0;
-        const shortTermDelta = history.length > 3 ? ((data.mcap - history[history.length - 3]) / history[history.length - 3]) * 100 : 0;
+        const shortTermDelta = mcapHistory.length > 3 ? ((data.mcap - mcapHistory[mcapHistory.length - 3]) / mcapHistory[mcapHistory.length - 3]) * 100 : 0;
 
         let isBuying = false;
         let isSelling = false;
@@ -368,13 +473,14 @@ const App: React.FC = () => {
               ...prev.activeTokens[addr],
               currentPrice,
               currentMcap: data.mcap,
-              mcapHistory: history
+              mcapHistory: mcapHistory,
+              priceHistory: priceHistory
             }
           }
         }));
 
         if (Math.random() > 0.85 || isBuying || isSelling) {
-          updateAiCommentary(addr, data, history, isBuying, isSelling);
+          updateAiCommentary(addr, data, mcapHistory, isBuying, isSelling);
         }
       }
     }, REFRESH_INTERVAL);
@@ -653,7 +759,7 @@ const App: React.FC = () => {
                 const totalTxns = buys + sells;
                 const buyRatio = totalTxns > 0 ? (buys / totalTxns) * 100 : 50;
 
-                const tokenTrades = state.trades.filter(t => t.address === token.metadata.address).sort((a, b) => b.timestamp - a.timestamp).slice(0, 5);
+                const tokenTrades = state.trades.filter(t => t.address === token.metadata.address).sort((a, b) => b.timestamp - a.timestamp);
 
                 return (
                   <div key={token.metadata.address} className="bg-[#010409] flex flex-col relative group">
@@ -683,25 +789,15 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="flex-1 bg-black relative overflow-hidden">
-                      <iframe 
-                        src={`https://dexscreener.com/solana/${token.metadata.address}?embed=1&theme=dark&trades=0&info=0`}
-                        className="w-full h-full border-none opacity-80"
-                        title={token.metadata.symbol}
-                      />
+                      {/* REPLACED IFRAME WITH CUSTOM TOKEN CHART */}
+                      <TokenChart data={token.priceHistory || []} trades={tokenTrades} />
                       
                       <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end pointer-events-none">
-                        {tokenTrades.map(trade => (
-                          <div key={trade.id} className={`flex items-center gap-2 px-2 py-1 rounded-md border backdrop-blur-md shadow-lg ${trade.type === 'BUY' ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-400' : 'bg-rose-950/80 border-rose-500/50 text-rose-400'} animate-in slide-in-from-right-8 fade-in duration-300`}>
-                            <div className="flex flex-col items-end leading-none">
-                               <span className="text-[9px] font-black uppercase tracking-wider">{trade.type === 'PARTIAL_SELL' ? 'SCALE' : trade.type}</span>
-                               <span className="text-[9px] font-mono opacity-80">@{formatPrice(trade.price)}</span>
-                            </div>
-                          </div>
-                        ))}
+                         {/* Optional Floating Trade Tickers can stay if desired, but chart now has markers */}
                       </div>
 
                       <div className="absolute bottom-2 left-2 right-2 pointer-events-none">
-                        <div className="bg-[#00FFA3] text-black p-2 rounded shadow-lg border border-white/20 pointer-events-auto">
+                        <div className="bg-[#00FFA3] text-black p-2 rounded shadow-lg border border-white/20 pointer-events-auto opacity-90 hover:opacity-100 transition-opacity">
                            <div className="flex justify-between items-center mb-1">
                              <div className="flex items-center gap-1">
                                 <Zap size={8} className="text-black fill-black" />
