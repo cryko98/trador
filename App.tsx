@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw
 } from 'lucide-react';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -91,6 +91,22 @@ const App: React.FC = () => {
         }
       };
     });
+  };
+
+  const resetAgent = () => {
+    if (confirm("⚠️ SYSTEM RESET CONFIRMATION\n\n- Reset Balance to 10 SOL\n- Clear Trade History\n- Close All Positions\n\nAre you sure you want to restart?")) {
+        const resetState: AppState = {
+            balance: INITIAL_SOL_BALANCE,
+            positions: {},
+            avgEntryPrices: {},
+            trades: [],
+            activeTokens: {},
+            status: 'IDLE'
+        };
+        setState(resetState);
+        setScannerResults([]);
+        localStorage.setItem('trador_multi_v1', JSON.stringify(resetState));
+    }
   };
 
   const handleScanMarkets = async () => {
@@ -361,7 +377,7 @@ const App: React.FC = () => {
   });
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
+    <div className="h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
       
       {/* Error Toast */}
       {inputError && (
@@ -374,22 +390,22 @@ const App: React.FC = () => {
       )}
 
       {/* Dynamic Navigation */}
-      <nav className="h-16 border-b border-slate-800/60 bg-[#0d1117]/95 backdrop-blur-xl flex items-center justify-between px-6 z-50">
-        <div className="flex items-center gap-6">
+      <nav className="h-16 border-b border-slate-800/60 bg-[#0d1117]/95 backdrop-blur-xl flex items-center justify-between px-3 md:px-6 z-50 shrink-0">
+        <div className="flex items-center gap-2 md:gap-6">
           <div className="flex items-center gap-2">
             <img src={LOGO_URL} alt="Trador" className="w-8 h-8 object-contain" />
             <div className="flex flex-col">
-              <span className="text-md font-black tracking-tighter neon-text leading-none uppercase">Trador Multi-Grid</span>
-              <span className="text-[7px] text-[#00FFA3] font-bold tracking-[0.3em] uppercase">Sovereign Cluster</span>
+              <span className="text-sm md:text-md font-black tracking-tighter neon-text leading-none uppercase">Trador<span className="hidden sm:inline"> Multi-Grid</span></span>
+              <span className="text-[7px] text-[#00FFA3] font-bold tracking-[0.3em] uppercase hidden sm:block">Sovereign Cluster</span>
             </div>
           </div>
           
           <div className="h-4 w-[1px] bg-slate-800 hidden md:block"></div>
           
-          {/* Auto Pilot Toggle */}
+          {/* Auto Pilot Toggle - Compact on mobile */}
           <button 
             onClick={() => setAutoMode(!autoMode)}
-            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${
+            className={`flex items-center gap-2 px-2 md:px-3 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${
               autoMode 
                 ? 'bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]' 
                 : 'bg-slate-900 border-slate-800 text-slate-500'
@@ -420,24 +436,33 @@ const App: React.FC = () => {
           </button>
         </div>
 
-        <div className="flex items-center gap-8">
+        <div className="flex items-center gap-2 md:gap-8">
           <div className="flex flex-col items-end">
-            <span className="text-[8px] text-slate-500 font-black uppercase">Cluster PNL</span>
-            <span className={`text-xs font-black ${(totalPnl as number) >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
-              {(totalPnl as number) >= 0 ? '+' : ''}{(totalPnl as number).toFixed(4)} SOL
+            <span className="text-[8px] text-slate-500 font-black uppercase hidden sm:block">Cluster PNL</span>
+            <span className={`text-[10px] md:text-xs font-black ${(totalPnl as number) >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
+              {(totalPnl as number) >= 0 ? '+' : ''}{(totalPnl as number).toFixed(4)} <span className="hidden sm:inline">SOL</span>
             </span>
           </div>
-          <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
-            <Wallet size={14} className="text-[#00FFA3]" />
-            <span className="text-xs font-black text-[#00FFA3]">{(state.balance as number).toFixed(3)} SOL</span>
+          <div className="bg-slate-900 border border-slate-800 px-2 md:px-4 py-1.5 md:py-2 rounded-lg flex items-center gap-2 md:gap-3">
+            <Wallet size={12} className="text-[#00FFA3] hidden sm:block" />
+            <span className="text-[10px] md:text-xs font-black text-[#00FFA3]">{(state.balance as number).toFixed(3)} SOL</span>
           </div>
+
+           {/* Reset Button */}
+           <button 
+              onClick={resetAgent}
+              className="bg-slate-900/50 hover:bg-rose-950/30 border border-slate-900 hover:border-rose-900 text-slate-500 hover:text-rose-500 p-1.5 md:p-2 rounded-lg transition-all"
+              title="Reset System Agent"
+          >
+              <RotateCcw size={14} />
+          </button>
         </div>
       </nav>
 
       {/* Grid Content */}
       <div className="flex-1 flex overflow-hidden">
         
-        {/* Left: Global Stats */}
+        {/* Left: Global Stats - Hidden on Mobile/Tablet */}
         <aside className="w-64 border-r border-slate-800/60 bg-[#0d1117]/60 flex flex-col hidden lg:flex">
           <div className="p-4 border-b border-slate-800/60">
             <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Active Exposure</span>
@@ -507,28 +532,28 @@ const App: React.FC = () => {
         {/* Main Workspace */}
         <main className="flex-1 overflow-hidden flex flex-col relative bg-black">
           {activeCount === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center relative overflow-hidden">
+            <div className="flex-1 flex flex-col items-center justify-center p-6 md:p-12 text-center relative overflow-hidden">
                {/* Background Grid Animation */}
                <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
                
                <div className="relative z-10 max-w-2xl w-full">
                  <div className="mb-8 flex flex-col items-center">
-                   <img src={LOGO_URL} alt="Trador" className="w-20 h-20 mb-6 opacity-80" />
+                   <img src={LOGO_URL} alt="Trador" className="w-16 h-16 md:w-20 md:h-20 mb-6 opacity-80" />
                    {autoMode ? (
                      <>
-                      <h2 className="text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
-                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets (&gt;6h Age)...</p>
+                      <h2 className="text-2xl md:text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
+                      <p className="text-[8px] md:text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets (&gt;6h Age)...</p>
                      </>
                    ) : (
                      <>
-                      <h2 className="text-3xl font-black italic tracking-tighter text-white uppercase neon-text">System Idle</h2>
-                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Deploy Contracts or Enable Auto-Pilot</p>
+                      <h2 className="text-2xl md:text-3xl font-black italic tracking-tighter text-white uppercase neon-text">System Idle</h2>
+                      <p className="text-[8px] md:text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Deploy Contracts or Enable Auto-Pilot</p>
                      </>
                    )}
                  </div>
 
                  {/* Scanner Module */}
-                 <div className="bg-[#0d1117] border border-slate-800 rounded-xl overflow-hidden shadow-2xl min-w-[320px]">
+                 <div className="bg-[#0d1117] border border-slate-800 rounded-xl overflow-hidden shadow-2xl min-w-[280px] md:min-w-[320px]">
                     <div className="h-10 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-4">
                       <div className="flex items-center gap-2 text-[#00FFA3]">
                          <Radar size={14} className={isScanning ? "animate-spin" : ""} />
@@ -592,8 +617,7 @@ const App: React.FC = () => {
           ) : (
             <div className={`grid h-full w-full gap-px bg-slate-800/40 ${
               activeCount === 1 ? 'grid-cols-1' : 
-              activeCount === 2 ? 'grid-cols-1 md:grid-cols-2' : 
-              activeCount <= 4 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3'
+              activeCount <= 4 ? 'grid-cols-1 md:grid-cols-2' : 'grid-cols-1 md:grid-cols-2 lg:grid-cols-3'
             }`}>
               {(Object.values(state.activeTokens) as ActiveTokenState[]).map((token) => {
                 const pos = state.positions[token.metadata.address] || 0;
@@ -704,13 +728,13 @@ const App: React.FC = () => {
         </main>
       </div>
 
-      <footer className="h-8 border-t border-slate-800/60 bg-[#0d1117] flex items-center justify-between px-6 text-[8px] font-black text-slate-500 tracking-[0.2em] uppercase">
+      <footer className="h-8 border-t border-slate-800/60 bg-[#0d1117] flex items-center justify-between px-6 text-[8px] font-black text-slate-500 tracking-[0.2em] uppercase shrink-0">
         <div className="flex gap-6">
           <span className="flex items-center gap-2">
             <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px] ${autoMode ? 'bg-[#00FFA3] shadow-[#00FFA3]' : 'bg-slate-500'}`}></div> 
             Cluster {autoMode ? 'Autonomous' : 'Manual'}
           </span>
-          <span>Latency: 22ms</span>
+          <span className="hidden sm:inline">Latency: 22ms</span>
         </div>
         <span>Trador Grid Protocol © 2025</span>
       </footer>
