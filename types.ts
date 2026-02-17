@@ -49,6 +49,7 @@ export interface AppState {
   balance: number;
   positions: { [address: string]: number };
   avgEntryPrices: { [address: string]: number };
+  avgEntryMcaps: { [address: string]: number };
   trades: Trade[];
   activeTokens: { [address: string]: ActiveTokenState };
   status: 'IDLE' | 'TRADING' | 'WAITING';

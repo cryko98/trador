@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { 
-  History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square
+  History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square, Briefcase
 } from 'lucide-react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
@@ -140,6 +140,7 @@ const App: React.FC = () => {
       balance: initial?.balance ?? INITIAL_SIM_BALANCE,
       positions: initial?.positions ?? {},
       avgEntryPrices: initial?.avgEntryPrices ?? {},
+      avgEntryMcaps: initial?.avgEntryMcaps ?? {},
       trades: initial?.trades ?? [],
       activeTokens: migratedActiveTokens,
       status: 'IDLE'
@@ -175,10 +176,11 @@ const App: React.FC = () => {
       balance: state.balance,
       positions: state.positions,
       avgEntryPrices: state.avgEntryPrices,
+      avgEntryMcaps: state.avgEntryMcaps,
       trades: state.trades,
-      activeTokens: state.activeTokens // Persist active token state including price history
+      activeTokens: state.activeTokens
     }));
-  }, [state.balance, state.positions, state.avgEntryPrices, state.trades, state.activeTokens]);
+  }, [state.balance, state.positions, state.avgEntryPrices, state.avgEntryMcaps, state.trades, state.activeTokens]);
 
   // --- EXECUTION ENGINE ---
   const executeAndRecordTrade = async (type: Trade['type'], metadata: TokenMetadata, amount: number, solAmount: number, comment?: string) => {
@@ -243,10 +245,13 @@ const App: React.FC = () => {
     setState(prev => {
       const currentPos = prev.positions[metadata.address] || 0;
       let newAvgEntry = prev.avgEntryPrices[metadata.address] || 0;
+      let newAvgEntryMcap = prev.avgEntryMcaps[metadata.address] || metadata.mcap;
       
       if (type === 'BUY') {
         const totalTokens = currentPos + amount;
         newAvgEntry = ((currentPos * newAvgEntry) + (amount * price)) / totalTokens;
+        // Calculate Weighted Average Entry MCAP
+        newAvgEntryMcap = ((currentPos * newAvgEntryMcap) + (amount * metadata.mcap)) / totalTokens;
       }
 
       return {
@@ -260,6 +265,10 @@ const App: React.FC = () => {
         avgEntryPrices: {
           ...prev.avgEntryPrices,
           [metadata.address]: type === 'BUY' ? newAvgEntry : (currentPos - amount <= 0 ? 0 : newAvgEntry)
+        },
+        avgEntryMcaps: {
+          ...prev.avgEntryMcaps,
+          [metadata.address]: type === 'BUY' ? newAvgEntryMcap : (currentPos - amount <= 0 ? 0 : newAvgEntryMcap)
         }
       };
     });
@@ -271,6 +280,7 @@ const App: React.FC = () => {
             balance: INITIAL_SIM_BALANCE,
             positions: {},
             avgEntryPrices: {},
+            avgEntryMcaps: {},
             trades: [],
             activeTokens: {},
             status: 'IDLE'
@@ -632,19 +642,60 @@ const App: React.FC = () => {
         
         {/* Left: Global Stats */}
         <aside className="w-64 border-r border-slate-800/60 bg-[#0d1117]/60 flex flex-col hidden lg:flex">
-          <div className="p-4 border-b border-slate-800/60 flex justify-between items-center">
-            <span className="text-[9px] font-black text-slate-500 uppercase tracking-widest">Active Exposure</span>
-            <span className="text-[9px] text-slate-600">{Object.keys(state.activeTokens).length} / {MAX_ACTIVE_TOKENS}</span>
+          <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-black/20">
+            <div className="flex items-center gap-2">
+                <Briefcase size={12} className="text-[#00FFA3]" />
+                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Portfolio</span>
+            </div>
+            <span className="text-[9px] text-slate-600 font-bold">{Object.keys(state.positions).filter(k => state.positions[k] > 0).length} Assets</span>
           </div>
+          
+          {/* Portfolio List */}
           <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
-            {Object.entries(state.positions).filter(([_, amt]) => (amt as number) > 0).map(([addr, amount]) => (
-              <div key={addr} className="mb-2 p-3 bg-slate-900/40 rounded border border-slate-800/50">
-                <div className="flex justify-between text-[10px] font-black mb-1">
-                  <span className="text-[#00FFA3]">{addr.slice(0, 4)}...{addr.slice(-4)}</span>
+            {Object.entries(state.positions).filter(([_, amt]) => (amt as number) > 0).map(([addr, amount]) => {
+               // Try to get metadata from active tokens, or scanner results if available, otherwise just use address
+               const activeData = state.activeTokens[addr];
+               const symbol = activeData?.metadata.symbol || addr.slice(0, 4).toUpperCase();
+               const currentPrice = activeData?.currentPrice || 0;
+               const entryPrice = state.avgEntryPrices[addr] || 0;
+               const entryMcap = state.avgEntryMcaps[addr] || 0;
+               
+               let pnlPct = 0;
+               if (currentPrice > 0 && entryPrice > 0) {
+                   pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+               }
+
+               return (
+                  <div key={addr} className="mb-2 p-3 bg-slate-900/40 rounded border border-slate-800/50 hover:border-[#00FFA3]/30 transition-colors">
+                    <div className="flex justify-between items-center mb-2">
+                      <div className="flex items-center gap-2">
+                        {activeData && <div className={`w-1.5 h-1.5 rounded-full ${pnlPct >= 0 ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse`}></div>}
+                        <span className="text-xs font-black text-white">{symbol}</span>
+                      </div>
+                      <span className={`text-[10px] font-mono font-bold ${pnlPct >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
+                        {pnlPct > 0 ? '+' : ''}{pnlPct.toFixed(1)}%
+                      </span>
+                    </div>
+                    
+                    <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-[9px] text-slate-400">
+                        <div className="flex flex-col">
+                            <span className="text-[8px] uppercase tracking-wider opacity-60">Entry MC</span>
+                            <span className="font-mono text-slate-300">{formattedMcap(entryMcap)}</span>
+                        </div>
+                        <div className="flex flex-col text-right">
+                            <span className="text-[8px] uppercase tracking-wider opacity-60">Holding</span>
+                            <span className="font-mono text-slate-300">{(amount as number).toLocaleString(undefined, { maximumFractionDigits: 1 })}</span>
+                        </div>
+                    </div>
+                  </div>
+               );
+            })}
+            
+            {Object.keys(state.positions).filter(k => state.positions[k] > 0).length === 0 && (
+                <div className="text-center py-6">
+                    <p className="text-[9px] text-slate-700 italic">No active positions</p>
                 </div>
-                <div className="text-[11px] text-white font-bold">{(amount as number).toLocaleString()} tokens</div>
-              </div>
-            ))}
+            )}
           </div>
           
           <div className="p-4 border-t border-slate-800/60 bg-black/20">
