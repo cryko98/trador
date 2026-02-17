@@ -177,12 +177,50 @@ const App: React.FC = () => {
         // console.log("Auto-Pilot: Scanning for targets...");
         const candidates = await fetchTrendingSolanaTokens();
         
-        // Find the best candidate that is NOT already active
-        const bestCandidate = candidates.find(c => !stateRef.current.activeTokens[c.address]);
+        // 1. Filter out already active tokens
+        const available = candidates.filter(c => !stateRef.current.activeTokens[c.address]);
+
+        // 2. Advanced Scoring & Selection Logic
+        const scoredCandidates = available.map(token => {
+           let score = 0;
+           
+           // A. Trend Score (1h Price Change)
+           // We prefer steady momentum (1-15%) over explosions or dumps
+           const p1h = token.priceChange1h || 0;
+           if (p1h > 1 && p1h < 15) score += 35;       // Sweet spot
+           else if (p1h >= 15 && p1h < 30) score += 20; // Strong, slightly risky
+           else if (p1h >= 30) score -= 30;             // Volatility spike / FOMO risk
+           else if (p1h < 0) score -= 100;              // Instant rejection for negative short-term trend
+
+           // B. Liquidity Flow Score (Buy Ratio)
+           // High buy ratio implies net inflows
+           const buys = token.txns24h?.buys || 0;
+           const sells = token.txns24h?.sells || 0;
+           const total = buys + sells;
+           const buyRatio = total > 0 ? buys / total : 0.5;
+           
+           if (buyRatio > 0.60) score += 30;      // Strong accumulation
+           else if (buyRatio > 0.50) score += 10; // Net positive
+
+           // C. Contract Age Preference
+           // We prefer "fresh" tokens (6h-24h) that have passed the 6h maturity check
+           const age = token.ageHours || 24; 
+           if (age < 24) score += 25;       // Fresh (< 1 day)
+           else if (age < 72) score += 10;  // Recent (< 3 days)
+           // older tokens get 0 bonus
+
+           return { token, score };
+        });
+
+        // 3. Sort by score descending
+        scoredCandidates.sort((a, b) => b.score - a.score);
+
+        // 4. Select the best candidate if it meets a minimum quality threshold
+        const bestMatch = scoredCandidates[0];
         
-        if (bestCandidate) {
-          // console.log(`Auto-Pilot: Deploying ${bestCandidate.symbol}`);
-          await deployToken(bestCandidate.address);
+        if (bestMatch && bestMatch.score > 0) {
+          // console.log(`Auto-Pilot: Deploying ${bestMatch.token.symbol} (Score: ${bestMatch.score})`);
+          await deployToken(bestMatch.token.address);
         }
       }
     };
@@ -303,6 +341,12 @@ const App: React.FC = () => {
 
   const formattedChange = (c: number) => {
     return `${c > 0 ? '+' : ''}${c.toFixed(2)}%`;
+  };
+
+  const formatPrice = (p: number) => {
+    if (p < 0.000001) return p.toExponential(2);
+    if (p < 0.001) return p.toFixed(6);
+    return p.toFixed(4);
   };
 
   // Filter Trades
@@ -556,6 +600,18 @@ const App: React.FC = () => {
                 const avg = state.avgEntryPrices[token.metadata.address] || 0;
                 const profit = avg > 0 ? ((token.currentPrice - avg) / avg) * 100 : 0;
                 
+                // Calculate Buy Ratio
+                const buys = token.metadata.txns24h?.buys || 0;
+                const sells = token.metadata.txns24h?.sells || 0;
+                const totalTxns = buys + sells;
+                const buyRatio = totalTxns > 0 ? (buys / totalTxns) * 100 : 50;
+
+                // Filter execution history for this token
+                const tokenTrades = state.trades
+                  .filter(t => t.address === token.metadata.address)
+                  .sort((a, b) => b.timestamp - a.timestamp)
+                  .slice(0, 5);
+
                 return (
                   <div key={token.metadata.address} className="bg-[#010409] flex flex-col relative group">
                     {/* Grid Cell Header */}
@@ -567,6 +623,19 @@ const App: React.FC = () => {
                             {token.metadata.priceChange24h >= 0 ? <TrendingUp size={8} /> : <TrendingDown size={8} />}
                             {formattedChange(token.metadata.priceChange24h)}
                          </span>
+                         {/* Pressure Bar */}
+                         <div className="flex flex-col gap-0.5 ml-2">
+                           <div className="flex items-center justify-between text-[6px] font-black uppercase tracking-wider text-slate-500 w-12">
+                             <span className="text-[#00FFA3]">B</span>
+                             <span className="text-rose-500">S</span>
+                           </div>
+                           <div className="w-12 h-1 bg-rose-900/50 rounded-full overflow-hidden flex">
+                             <div 
+                               className="h-full bg-[#00FFA3]" 
+                               style={{ width: `${buyRatio}%` }} 
+                             />
+                           </div>
+                         </div>
                       </div>
                       <div className="flex items-center gap-3">
                         {pos > 0 && (
@@ -588,6 +657,29 @@ const App: React.FC = () => {
                         title={token.metadata.symbol}
                       />
                       
+                      {/* Trade Execution Overlay (New) */}
+                      <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end pointer-events-none">
+                        {tokenTrades.map(trade => (
+                          <div key={trade.id} className={`
+                            flex items-center gap-2 px-2 py-1 rounded-md border backdrop-blur-md shadow-lg
+                            ${trade.type === 'BUY' 
+                              ? 'bg-emerald-950/80 border-emerald-500/50 text-emerald-400' 
+                              : 'bg-rose-950/80 border-rose-500/50 text-rose-400'}
+                            animate-in slide-in-from-right-8 fade-in duration-300
+                          `}>
+                            <div className={`w-1.5 h-1.5 rounded-full ${trade.type === 'BUY' ? 'bg-emerald-400' : 'bg-rose-400'} shadow-[0_0_5px_currentColor]`} />
+                            <div className="flex flex-col items-end leading-none">
+                               <span className="text-[9px] font-black uppercase tracking-wider">
+                                 {trade.type === 'PARTIAL_SELL' ? 'SCALE' : trade.type}
+                               </span>
+                               <span className="text-[9px] font-mono opacity-80">
+                                 @{formatPrice(trade.price)}
+                               </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+
                       {/* Individual Token HUD */}
                       <div className="absolute bottom-2 left-2 right-2 pointer-events-none">
                         <div className="bg-[#00FFA3] text-black p-2 rounded shadow-lg border border-white/20 pointer-events-auto">

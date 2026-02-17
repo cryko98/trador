@@ -29,6 +29,9 @@ export interface TokenMetadata {
   liquidity: number;
   volume24h: number;
   priceChange24h: number;
+  priceChange1h?: number;
+  ageHours?: number;
+  txns24h: { buys: number; sells: number };
 }
 
 export interface ActiveTokenState {

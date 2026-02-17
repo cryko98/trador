@@ -18,7 +18,13 @@ export const fetchTokenData = async (address: string): Promise<TokenMetadata | n
         mcap: pair.marketCap || pair.fdv || 0,
         liquidity: pair.liquidity?.usd || 0,
         volume24h: pair.volume?.h24 || 0,
-        priceChange24h: pair.priceChange?.h24 || 0
+        priceChange24h: pair.priceChange?.h24 || 0,
+        priceChange1h: pair.priceChange?.h1 || 0,
+        ageHours: (Date.now() - (pair.pairCreatedAt || Date.now())) / (1000 * 60 * 60),
+        txns24h: {
+          buys: pair.txns?.h24?.buys || 0,
+          sells: pair.txns?.h24?.sells || 0
+        }
       };
     }
     return null;
@@ -91,7 +97,13 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
                 mcap: pair.marketCap || fdv,
                 liquidity: liq,
                 volume24h: vol24,
-                priceChange24h: priceChange24
+                priceChange24h: priceChange24,
+                priceChange1h: pair.priceChange?.h1 || 0,
+                ageHours: age / (1000 * 60 * 60),
+                txns24h: {
+                    buys: pair.txns?.h24?.buys || 0,
+                    sells: pair.txns?.h24?.sells || 0
+                }
              });
         }
     });
