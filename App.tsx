@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square, Briefcase
+  History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square, Briefcase, ChevronDown, ChevronRight, ExternalLink
 } from 'lucide-react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
@@ -34,6 +34,7 @@ const App: React.FC = () => {
   const [liveMode, setLiveMode] = useState(false); // Live vs Sim
   const [scannerResults, setScannerResults] = useState<TokenMetadata[]>([]);
   const [realWalletBalance, setRealWalletBalance] = useState<number>(0);
+  const [isPortfolioExpanded, setIsPortfolioExpanded] = useState(true);
   
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('trador_multi_v2');
@@ -183,6 +184,35 @@ const App: React.FC = () => {
         }
       };
     });
+  };
+
+  const closePosition = async (address: string) => {
+    let metadata: TokenMetadata | undefined = state.activeTokens[address]?.metadata;
+    let currentPrice = state.activeTokens[address]?.currentPrice;
+
+    // If we don't have metadata or price in active state (e.g. chart closed), fetch it
+    if (!metadata || !currentPrice) {
+        setSystemMessage(`⚠️ Fetching data for closure...`);
+        const data = await fetchTokenData(address);
+        if (data) {
+            metadata = data;
+            currentPrice = parseFloat(data.priceNative);
+        } else {
+            setSystemMessage(`❌ Could not fetch data for ${address.slice(0,6)}`);
+            return;
+        }
+    }
+
+    const positionSize = state.positions[address];
+    if (!positionSize || positionSize <= 0) return;
+
+    await executeAndRecordTrade(
+        'SELL', 
+        metadata, 
+        positionSize, 
+        positionSize * currentPrice, 
+        "Manual Portfolio Closure"
+    );
   };
 
   const resetAgent = () => {
@@ -552,61 +582,86 @@ const App: React.FC = () => {
         
         {/* Left: Global Stats */}
         <aside className="w-64 border-r border-slate-800/60 bg-[#0d1117]/60 flex flex-col hidden lg:flex">
-          <div className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-black/20">
+          {/* Portfolio Section */}
+          <div 
+             className="p-4 border-b border-slate-800/60 flex justify-between items-center bg-black/20 cursor-pointer hover:bg-slate-900/50 transition-colors"
+             onClick={() => setIsPortfolioExpanded(!isPortfolioExpanded)}
+          >
             <div className="flex items-center gap-2">
                 <Briefcase size={12} className="text-[#00FFA3]" />
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Portfolio</span>
             </div>
-            <span className="text-[9px] text-slate-600 font-bold">{Object.keys(state.positions).filter(k => state.positions[k] > 0).length} Assets</span>
+            <div className="flex items-center gap-2">
+                <span className="text-[9px] text-slate-600 font-bold">{Object.keys(state.positions).filter(k => state.positions[k] > 0).length} Assets</span>
+                {isPortfolioExpanded ? <ChevronDown size={12} className="text-slate-500"/> : <ChevronRight size={12} className="text-slate-500"/>}
+            </div>
           </div>
           
           {/* Portfolio List */}
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-2">
-            {Object.entries(state.positions).filter(([_, amt]) => (amt as number) > 0).map(([addr, amount]) => {
-               // Try to get metadata from active tokens, or scanner results if available, otherwise just use address
-               const activeData = state.activeTokens[addr];
-               const symbol = activeData?.metadata.symbol || addr.slice(0, 4).toUpperCase();
-               const currentPrice = activeData?.currentPrice || 0;
-               const entryPrice = state.avgEntryPrices[addr] || 0;
-               const entryMcap = state.avgEntryMcaps[addr] || 0;
-               
-               let pnlPct = 0;
-               if (currentPrice > 0 && entryPrice > 0) {
-                   pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
-               }
+          {isPortfolioExpanded && (
+              <div className="flex-1 overflow-y-auto custom-scrollbar p-2 transition-all">
+                {Object.entries(state.positions).filter(([_, amt]) => (amt as number) > 0).map(([addr, amount]) => {
+                   // Try to get metadata from active tokens, or scanner results if available, otherwise just use address
+                   const activeData = state.activeTokens[addr];
+                   const symbol = activeData?.metadata.symbol || addr.slice(0, 4).toUpperCase();
+                   const name = activeData?.metadata.name || "Unknown Token";
+                   const currentPrice = activeData?.currentPrice || 0;
+                   const entryPrice = state.avgEntryPrices[addr] || 0;
+                   const entryMcap = state.avgEntryMcaps[addr] || 0;
+                   
+                   let pnlPct = 0;
+                   if (currentPrice > 0 && entryPrice > 0) {
+                       pnlPct = ((currentPrice - entryPrice) / entryPrice) * 100;
+                   }
 
-               return (
-                  <div key={addr} className="mb-2 p-3 bg-slate-900/40 rounded border border-slate-800/50 hover:border-[#00FFA3]/30 transition-colors">
-                    <div className="flex justify-between items-center mb-2">
-                      <div className="flex items-center gap-2">
-                        {activeData && <div className={`w-1.5 h-1.5 rounded-full ${pnlPct >= 0 ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse`}></div>}
-                        <span className="text-xs font-black text-white">{symbol}</span>
+                   return (
+                      <div key={addr} className="mb-2 p-3 bg-slate-900/40 rounded border border-slate-800/50 hover:border-[#00FFA3]/30 transition-colors group">
+                        <div className="flex justify-between items-start mb-2">
+                          <div className="flex flex-col">
+                            <div className="flex items-center gap-2">
+                                {activeData && <div className={`w-1.5 h-1.5 rounded-full ${pnlPct >= 0 ? 'bg-emerald-500' : 'bg-rose-500'} animate-pulse`}></div>}
+                                <span className="text-xs font-black text-white">{symbol}</span>
+                            </div>
+                            <span className="text-[8px] text-slate-500 truncate max-w-[100px]">{name}</span>
+                          </div>
+                          <span className={`text-[10px] font-mono font-bold ${pnlPct >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
+                            {pnlPct > 0 ? '+' : ''}{pnlPct.toFixed(1)}%
+                          </span>
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-[9px] text-slate-400 border-t border-slate-800/50 pt-2 mb-2">
+                            <div className="flex flex-col">
+                                <span className="text-[7px] uppercase tracking-wider opacity-60">Entry MC</span>
+                                <span className="font-mono text-slate-300 font-bold">{formattedMcap(entryMcap)}</span>
+                            </div>
+                            <div className="flex flex-col text-right">
+                                <span className="text-[7px] uppercase tracking-wider opacity-60">Holding</span>
+                                <span className="font-mono text-slate-300">{(amount as number).toLocaleString(undefined, { maximumFractionDigits: 1 })}</span>
+                            </div>
+                        </div>
+
+                        {/* CLOSE POSITION BUTTON */}
+                        <button 
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                if(confirm(`Close position for ${symbol}?`)) closePosition(addr);
+                            }}
+                            className="w-full mt-1 flex items-center justify-center gap-1.5 bg-rose-950/20 hover:bg-rose-900/40 border border-rose-900/30 text-rose-400/80 hover:text-rose-300 text-[8px] font-black uppercase tracking-widest py-1.5 rounded transition-all"
+                        >
+                            <XCircle size={10} />
+                            <span>Close Position</span>
+                        </button>
                       </div>
-                      <span className={`text-[10px] font-mono font-bold ${pnlPct >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
-                        {pnlPct > 0 ? '+' : ''}{pnlPct.toFixed(1)}%
-                      </span>
+                   );
+                })}
+                
+                {Object.keys(state.positions).filter(k => state.positions[k] > 0).length === 0 && (
+                    <div className="text-center py-6">
+                        <p className="text-[9px] text-slate-700 italic">No active positions</p>
                     </div>
-                    
-                    <div className="grid grid-cols-2 gap-y-1 gap-x-2 text-[9px] text-slate-400">
-                        <div className="flex flex-col">
-                            <span className="text-[8px] uppercase tracking-wider opacity-60">Entry MC</span>
-                            <span className="font-mono text-slate-300">{formattedMcap(entryMcap)}</span>
-                        </div>
-                        <div className="flex flex-col text-right">
-                            <span className="text-[8px] uppercase tracking-wider opacity-60">Holding</span>
-                            <span className="font-mono text-slate-300">{(amount as number).toLocaleString(undefined, { maximumFractionDigits: 1 })}</span>
-                        </div>
-                    </div>
-                  </div>
-               );
-            })}
-            
-            {Object.keys(state.positions).filter(k => state.positions[k] > 0).length === 0 && (
-                <div className="text-center py-6">
-                    <p className="text-[9px] text-slate-700 italic">No active positions</p>
-                </div>
-            )}
-          </div>
+                )}
+              </div>
+          )}
           
           <div className="p-4 border-t border-slate-800/60 bg-black/20">
              <div className="flex items-center justify-between mb-3">
@@ -619,7 +674,7 @@ const App: React.FC = () => {
                </span>
              </div>
              
-             <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
+             <div className={`space-y-2 overflow-y-auto custom-scrollbar transition-all ${isPortfolioExpanded ? 'max-h-32' : 'max-h-96'}`}>
                {filteredTrades.slice(0, 20).map(t => (
                  <div key={t.id} className="text-[9px] flex justify-between border-b border-slate-800/30 pb-1">
                    <span className={t.type === 'BUY' ? 'text-[#00FFA3]' : 'text-rose-500'}>{t.type === 'PARTIAL_SELL' ? 'SCALE' : t.type} {t.symbol}</span>
@@ -743,6 +798,9 @@ const App: React.FC = () => {
                             {profit >= 0 ? '+' : ''}{profit.toFixed(1)}%
                           </span>
                         )}
+                        <a href={`https://dexscreener.com/solana/${token.metadata.address}`} target="_blank" rel="noreferrer" className="text-slate-600 hover:text-[#00FFA3]">
+                            <ExternalLink size={12} />
+                        </a>
                         <button onClick={() => removeToken(token.metadata.address)} className="text-slate-600 hover:text-rose-500 transition-colors">
                           <XCircle size={14} />
                         </button>
