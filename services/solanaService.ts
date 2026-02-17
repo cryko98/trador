@@ -45,7 +45,7 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
     // 2. Filter for Solana chain and grab addresses (Grab more to allow for strict filtering)
     const solanaAddresses = boosts
       .filter((item: any) => item.chainId === 'solana')
-      .slice(0, 40) 
+      .slice(0, 50) 
       .map((item: any) => item.tokenAddress)
       .join(',');
 
@@ -57,11 +57,13 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
 
     if (!pairsData.pairs) return [];
 
-    // 4. Smart Swing Filter Logic
+    // 4. Smart Swing Filter Logic (Relaxed for Simulation)
     const candidates = new Map<string, TokenMetadata>();
-    const MIN_AGE_MS = 6 * 60 * 60 * 1000; // 6 Hours
-    const MIN_LIQUIDITY = 100000; // $100k
-    const MIN_VOLUME = 250000; // $250k
+    
+    // RELAXED CONSTRAINTS
+    const MIN_AGE_MS = 15 * 60 * 1000; // 15 Minutes (was 6 hours)
+    const MIN_LIQUIDITY = 5000;        // $5k (was $100k)
+    const MIN_VOLUME = 10000;          // $10k (was $250k)
     
     pairsData.pairs.forEach((pair: any) => {
         const vol24 = pair.volume?.h24 || 0;
@@ -74,9 +76,11 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
         const isSolana = pair.chainId === 'solana' && pair.quoteToken.symbol === 'SOL';
         const isLiquid = liq > MIN_LIQUIDITY;
         const hasVolume = vol24 > MIN_VOLUME;
-        const isNotCrashing = priceChange24 > -15; // Avoid tokens down > 15% in 24h
-        const isMature = age > MIN_AGE_MS; // Avoid instant rugs (must be > 6h old)
-        const isNotManipulated = fdv > 0 && (liq / fdv) > 0.01; // Liquidity must be at least 1% of FDV
+        // Relaxed crash check: Allow drops up to -30% (dip buying)
+        const isNotCrashing = priceChange24 > -30; 
+        const isMature = age > MIN_AGE_MS; 
+        // Relaxed manipulation check
+        const isNotManipulated = fdv > 0; 
 
         if (
             isSolana && 

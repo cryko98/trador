@@ -201,29 +201,28 @@ const App: React.FC = () => {
            let score = 0;
            
            // A. Trend Score (1h Price Change)
-           // We prefer steady momentum (1-15%) over explosions or dumps
+           // Adjusted logic: More permissive of neutral/slight dips
            const p1h = token.priceChange1h || 0;
-           if (p1h > 1 && p1h < 15) score += 35;       // Sweet spot
-           else if (p1h >= 15 && p1h < 30) score += 20; // Strong, slightly risky
-           else if (p1h >= 30) score -= 30;             // Volatility spike / FOMO risk
-           else if (p1h < 0) score -= 100;              // Instant rejection for negative short-term trend
+           if (p1h > 0 && p1h < 15) score += 35;       
+           else if (p1h >= 15 && p1h < 50) score += 20; 
+           else if (p1h >= 50) score -= 10;             // Volatility caution
+           else if (p1h >= -5 && p1h <= 0) score += 10; // Consolidation is OK
+           else if (p1h < -5) score -= 50;              // Strong dump penalty
 
            // B. Liquidity Flow Score (Buy Ratio)
-           // High buy ratio implies net inflows
            const buys = token.txns24h?.buys || 0;
            const sells = token.txns24h?.sells || 0;
            const total = buys + sells;
            const buyRatio = total > 0 ? buys / total : 0.5;
            
-           if (buyRatio > 0.60) score += 30;      // Strong accumulation
-           else if (buyRatio > 0.50) score += 10; // Net positive
+           if (buyRatio > 0.60) score += 30;      
+           else if (buyRatio > 0.50) score += 10; 
+           else score -= 10; // Sell pressure penalty
 
            // C. Contract Age Preference
-           // We prefer "fresh" tokens (6h-24h) that have passed the 6h maturity check
-           const age = token.ageHours || 24; 
-           if (age < 24) score += 25;       // Fresh (< 1 day)
-           else if (age < 72) score += 10;  // Recent (< 3 days)
-           // older tokens get 0 bonus
+           const age = token.ageHours || 0.1; 
+           if (age < 24) score += 25;       // Fresh
+           else if (age < 72) score += 10;  // Recent
 
            return { token, score };
         });
@@ -231,10 +230,10 @@ const App: React.FC = () => {
         // 3. Sort by score descending
         scoredCandidates.sort((a, b) => b.score - a.score);
 
-        // 4. Select the best candidate if it meets a minimum quality threshold
+        // 4. Select the best candidate (Lowered threshold to 0 to ensure action)
         const bestMatch = scoredCandidates[0];
         
-        if (bestMatch && bestMatch.score > 0) {
+        if (bestMatch && bestMatch.score > -20) {
           // console.log(`Auto-Pilot: Deploying ${bestMatch.token.symbol} (Score: ${bestMatch.score})`);
           await deployToken(bestMatch.token.address);
         }
@@ -542,7 +541,7 @@ const App: React.FC = () => {
                    {autoMode ? (
                      <>
                       <h2 className="text-2xl md:text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
-                      <p className="text-[8px] md:text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets (&gt;6h Age)...</p>
+                      <p className="text-[8px] md:text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Grade Swing Targets...</p>
                      </>
                    ) : (
                      <>
