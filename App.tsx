@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, RefreshCw, PlusCircle, Bot, Zap
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap
 } from 'lucide-react';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -113,7 +113,8 @@ const App: React.FC = () => {
 
     // Check if we have metadata from scanner first to avoid extra fetch
     const preloaded = scannerResults.find(t => t.address === targetCa);
-    let data = preloaded;
+    // Fix: Explicitly type data to allow null assignment from fetchTokenData
+    let data: TokenMetadata | null | undefined = preloaded;
 
     if (!data) {
         data = await fetchTokenData(targetCa);
