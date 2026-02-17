@@ -27,6 +27,7 @@ export interface TokenMetadata {
   fdv: number;
   mcap: number;
   liquidity: number;
+  volume24h: number;
 }
 
 export interface ActiveTokenState {

@@ -16,7 +16,8 @@ export const fetchTokenData = async (address: string): Promise<TokenMetadata | n
         address: pair.baseToken.address,
         fdv: pair.fdv || 0,
         mcap: pair.marketCap || pair.fdv || 0,
-        liquidity: pair.liquidity?.usd || 0
+        liquidity: pair.liquidity?.usd || 0,
+        volume24h: pair.volume?.h24 || 0
       };
     }
     return null;
@@ -37,7 +38,7 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
     // 2. Filter for Solana chain and grab addresses
     const solanaAddresses = boosts
       .filter((item: any) => item.chainId === 'solana')
-      .slice(0, 20) // Limit to top 20 to avoid URL length issues
+      .slice(0, 30) // Increased fetch limit to find high volume candidates
       .map((item: any) => item.tokenAddress)
       .join(',');
 
@@ -50,14 +51,18 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
     if (!pairsData.pairs) return [];
 
     // 4. Map to TokenMetadata and Filter for Swing Trade Suitability
-    // Criteria: Must be Solana pair, Valid Liquidity, Not already a tiny microcap (for swing safety)
+    // Criteria: High Volume Focus
     const candidates = new Map<string, TokenMetadata>();
     
     pairsData.pairs.forEach((pair: any) => {
+        const vol24 = pair.volume?.h24 || 0;
+        const liq = pair.liquidity?.usd || 0;
+
         if (
             pair.chainId === 'solana' && 
             pair.quoteToken.symbol === 'SOL' && 
-            (pair.liquidity?.usd || 0) > 10000 && // Min $10k liquidity
+            vol24 > 250000 && // STRICT: Min $250k volume in 24h
+            liq > 50000 && // Safety: Min $50k liquidity
             !candidates.has(pair.baseToken.address)
         ) {
              candidates.set(pair.baseToken.address, {
@@ -68,13 +73,14 @@ export const fetchTrendingSolanaTokens = async (): Promise<TokenMetadata[]> => {
                 address: pair.baseToken.address,
                 fdv: pair.fdv || 0,
                 mcap: pair.marketCap || pair.fdv || 0,
-                liquidity: pair.liquidity?.usd || 0
+                liquidity: liq,
+                volume24h: vol24
              });
         }
     });
 
-    // Sort by Liquidity (High liquidity = better swing candidates generally)
-    return Array.from(candidates.values()).sort((a, b) => b.liquidity - a.liquidity);
+    // Sort by 24h Volume Descending (Highest volume first)
+    return Array.from(candidates.values()).sort((a, b) => b.volume24h - a.volume24h);
   } catch (e) {
     console.error("Scanner Error:", e);
     return [];

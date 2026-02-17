@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3
 } from 'lucide-react';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -290,6 +290,12 @@ const App: React.FC = () => {
     if (m >= 1000) return `$${(m / 1000).toFixed(2)}K`;
     return `$${m.toFixed(0)}`;
   };
+  
+  const formattedVol = (v: number) => {
+     if (v >= 1000000) return `$${(v / 1000000).toFixed(1)}M`;
+     if (v >= 1000) return `$${(v / 1000).toFixed(1)}K`;
+     return `$${v.toFixed(0)}`;
+  };
 
   return (
     <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
@@ -413,7 +419,7 @@ const App: React.FC = () => {
                    {autoMode ? (
                      <>
                       <h2 className="text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
-                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Liquid Targets...</p>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Volume Targets (>250k)...</p>
                      </>
                    ) : (
                      <>
@@ -423,20 +429,59 @@ const App: React.FC = () => {
                    )}
                  </div>
 
-                 {/* Scanner Module - Always visible but functional manually */}
-                 <div className="bg-[#0d1117] border border-slate-800 rounded-xl overflow-hidden shadow-2xl opacity-60 hover:opacity-100 transition-opacity">
+                 {/* Scanner Module */}
+                 <div className="bg-[#0d1117] border border-slate-800 rounded-xl overflow-hidden shadow-2xl min-w-[320px]">
                     <div className="h-10 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-4">
                       <div className="flex items-center gap-2 text-[#00FFA3]">
                          <Radar size={14} className={isScanning ? "animate-spin" : ""} />
-                         <span className="text-[10px] font-black uppercase tracking-widest">Global Market Scan</span>
+                         <span className="text-[10px] font-black uppercase tracking-widest">High Volume Scan</span>
                       </div>
+                      <button onClick={handleScanMarkets} className="text-slate-500 hover:text-white transition-colors">
+                        <Radar size={12} className={isScanning ? "animate-spin" : ""} />
+                      </button>
                     </div>
 
-                    <div className="p-4 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar flex items-center justify-center">
-                         <div className="text-[10px] text-slate-600 uppercase tracking-wider flex items-center gap-2">
-                            {autoMode && <div className="w-2 h-2 bg-[#00FFA3] rounded-full animate-ping"></div>}
-                            {autoMode ? "Continuous Scanning Active" : "Waiting for manual scan"}
-                         </div>
+                    <div className="p-4 min-h-[200px] max-h-[300px] overflow-y-auto custom-scrollbar">
+                      {isScanning ? (
+                        <div className="flex flex-col items-center justify-center h-40 gap-3">
+                          <div className="w-8 h-8 border-2 border-[#00FFA3] border-t-transparent rounded-full animate-spin"></div>
+                          <span className="text-[10px] text-slate-500 uppercase animate-pulse">Scanning Volume...</span>
+                        </div>
+                      ) : scannerResults.length > 0 ? (
+                        <div className="grid grid-cols-1 gap-2">
+                           {scannerResults.map(token => (
+                             <div key={token.address} className="bg-black/40 border border-slate-800 hover:border-[#00FFA3] p-2 rounded group transition-all flex justify-between items-center cursor-pointer" onClick={() => deployToken(token.address)}>
+                                <div className="flex items-center gap-3">
+                                  <img 
+                                    src={`https://dd.dexscreener.com/ds-data/tokens/solana/${token.address}.png`} 
+                                    onError={(e) => e.currentTarget.src = LOGO_URL}
+                                    className="w-8 h-8 rounded-full bg-slate-900" 
+                                    alt={token.symbol}
+                                  />
+                                  <div className="flex flex-col text-left">
+                                    <span className="text-xs font-black text-white">{token.symbol}</span>
+                                    <div className="flex gap-2">
+                                        <span className="text-[9px] text-slate-500">{formattedMcap(token.mcap)} MCAP</span>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div className="flex flex-col items-end">
+                                    <div className="flex items-center gap-1 text-[#00FFA3]">
+                                        <BarChart3 size={10} />
+                                        <span className="text-[10px] font-black">{formattedVol(token.volume24h)}</span>
+                                    </div>
+                                    <span className="text-[8px] text-slate-600 uppercase">24h Vol</span>
+                                </div>
+                             </div>
+                           ))}
+                        </div>
+                      ) : (
+                        <div className="flex flex-col items-center justify-center h-40 text-slate-600">
+                          <p className="text-[10px] uppercase tracking-wider mb-4">
+                            {autoMode ? "Scanning..." : "No High-Vol Targets"}
+                          </p>
+                        </div>
+                      )}
                     </div>
                  </div>
                </div>
@@ -459,6 +504,9 @@ const App: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span className="text-[11px] font-black text-white">{token.metadata.symbol}</span>
                         <span className="text-[8px] text-[#00FFA3] font-black">{formattedMcap(token.currentMcap)}</span>
+                         <span className="text-[8px] text-slate-500 flex items-center gap-0.5 border-l border-slate-700 pl-2 ml-1">
+                            <BarChart3 size={8} /> {formattedVol(token.metadata.volume24h)}
+                         </span>
                       </div>
                       <div className="flex items-center gap-3">
                         {pos > 0 && (
