@@ -1,19 +1,25 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, RefreshCw, PlusCircle, Bot, Zap
 } from 'lucide-react';
-import { fetchTokenData } from './services/solanaService';
+import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
 import { AppState, Trade, TokenMetadata, ActiveTokenState } from './types';
 
 const INITIAL_SOL_BALANCE = 10;
 const REFRESH_INTERVAL = 5000;
+const AUTO_PILOT_INTERVAL = 12000; // Check for new tokens every 12s
+const MAX_ACTIVE_TOKENS = 6;
 const MCAP_HISTORY_LIMIT = 20;
 const LOGO_URL = "https://wkkeyyrknmnynlcefugq.supabase.co/storage/v1/object/public/peng/trador.png";
 
 const App: React.FC = () => {
   const [caInput, setCaInput] = useState('');
+  const [isScanning, setIsScanning] = useState(false);
+  const [autoMode, setAutoMode] = useState(true); // Auto-pilot on by default
+  const [scannerResults, setScannerResults] = useState<TokenMetadata[]>([]);
+  
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('trador_multi_v1');
     const initial = saved ? JSON.parse(saved) : null;
@@ -83,18 +89,41 @@ const App: React.FC = () => {
     });
   };
 
+  const handleScanMarkets = async () => {
+    setIsScanning(true);
+    setScannerResults([]);
+    const results = await fetchTrendingSolanaTokens();
+    // Filter out already active tokens
+    const newResults = results.filter(t => !stateRef.current.activeTokens[t.address]);
+    setScannerResults(newResults);
+    setIsScanning(false);
+    return newResults;
+  };
+
   const deployToken = async (targetCa: string) => {
     if (!targetCa || targetCa.trim().length < 32) {
-      setInputError('Invalid CA');
-      setTimeout(() => setInputError(''), 3000);
+      if (!autoMode) {
+        setInputError('Invalid CA');
+        setTimeout(() => setInputError(''), 3000);
+      }
       return;
     }
-    if (state.activeTokens[targetCa]) return;
+    // Use ref to check current state to prevent race conditions in auto mode
+    if (stateRef.current.activeTokens[targetCa]) return;
 
-    const data = await fetchTokenData(targetCa);
+    // Check if we have metadata from scanner first to avoid extra fetch
+    const preloaded = scannerResults.find(t => t.address === targetCa);
+    let data = preloaded;
+
     if (!data) {
-      setInputError('Token not found');
-      setTimeout(() => setInputError(''), 3000);
+        data = await fetchTokenData(targetCa);
+    }
+
+    if (!data) {
+      if (!autoMode) {
+        setInputError('Token not found');
+        setTimeout(() => setInputError(''), 3000);
+      }
       return;
     }
 
@@ -104,10 +133,10 @@ const App: React.FC = () => {
       activeTokens: {
         ...prev.activeTokens,
         [targetCa]: {
-          metadata: data,
-          currentPrice: parseFloat(data.priceNative),
-          currentMcap: data.mcap,
-          mcapHistory: [data.mcap],
+          metadata: data!,
+          currentPrice: parseFloat(data!.priceNative),
+          currentMcap: data!.mcap,
+          mcapHistory: [data!.mcap],
           message: "Initiating tactical monitoring...",
           sentiment: 'NEUTRAL',
           isAiLoading: false
@@ -115,7 +144,8 @@ const App: React.FC = () => {
       }
     }));
     setCaInput('');
-    setInputError('');
+    setScannerResults(prev => prev.filter(t => t.address !== targetCa)); // Remove from scanner list
+    if (!autoMode) setInputError('');
   };
 
   const removeToken = (address: string) => {
@@ -130,7 +160,38 @@ const App: React.FC = () => {
     });
   };
 
-  // MULTI-TRADING ENGINE
+  // --- AUTO PILOT ENGINE ---
+  useEffect(() => {
+    if (!autoMode) return;
+
+    const runAutoPilot = async () => {
+      const currentActiveCount = Object.keys(stateRef.current.activeTokens).length;
+      
+      // Only deploy new tokens if we have space
+      if (currentActiveCount < MAX_ACTIVE_TOKENS) {
+        // console.log("Auto-Pilot: Scanning for targets...");
+        const candidates = await fetchTrendingSolanaTokens();
+        
+        // Find the best candidate that is NOT already active
+        const bestCandidate = candidates.find(c => !stateRef.current.activeTokens[c.address]);
+        
+        if (bestCandidate) {
+          // console.log(`Auto-Pilot: Deploying ${bestCandidate.symbol}`);
+          await deployToken(bestCandidate.address);
+        }
+      }
+    };
+
+    // Initial run
+    runAutoPilot();
+
+    const interval = setInterval(runAutoPilot, AUTO_PILOT_INTERVAL);
+    return () => clearInterval(interval);
+  }, [autoMode]); 
+  // Dependency is only autoMode. We use stateRef inside to get fresh state without re-triggering the effect.
+
+
+  // --- TRADING ENGINE ---
   useEffect(() => {
     if (state.status !== 'TRADING') return;
 
@@ -255,6 +316,19 @@ const App: React.FC = () => {
           
           <div className="h-4 w-[1px] bg-slate-800 hidden md:block"></div>
           
+          {/* Auto Pilot Toggle */}
+          <button 
+            onClick={() => setAutoMode(!autoMode)}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all text-[10px] font-bold uppercase tracking-wider ${
+              autoMode 
+                ? 'bg-[#00FFA3]/10 border-[#00FFA3] text-[#00FFA3]' 
+                : 'bg-slate-900 border-slate-800 text-slate-500'
+            }`}
+          >
+            <Bot size={14} className={autoMode ? "animate-pulse" : ""} />
+            <span className="hidden md:inline">Auto-Pilot: {autoMode ? 'ON' : 'OFF'}</span>
+          </button>
+
           <div className="relative group hidden md:flex items-center">
             <Search className="absolute left-3 text-slate-500" size={14} />
             <input 
@@ -262,23 +336,29 @@ const App: React.FC = () => {
               value={caInput}
               onChange={(e) => setCaInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && deployToken(caInput)}
-              placeholder="Deploy New CA..."
+              placeholder="Deploy Manually..."
               className="bg-black/50 border border-slate-800 rounded-lg py-1.5 pl-9 pr-3 text-[10px] w-64 outline-none focus:border-[#00FFA3] transition-all"
             />
           </div>
+
+          <button 
+            onClick={handleScanMarkets} 
+            disabled={isScanning}
+            className="hidden md:flex items-center gap-2 bg-slate-900 border border-slate-800 hover:border-[#00FFA3] text-slate-400 hover:text-[#00FFA3] px-3 py-1.5 rounded-lg transition-all text-[10px] font-bold uppercase tracking-wider"
+          >
+             <Radar size={12} className={isScanning ? "animate-spin" : ""} />
+          </button>
         </div>
 
         <div className="flex items-center gap-8">
           <div className="flex flex-col items-end">
             <span className="text-[8px] text-slate-500 font-black uppercase">Cluster PNL</span>
-            {/* Fix: Explicitly handle totalPnl as a number */}
             <span className={`text-xs font-black ${(totalPnl as number) >= 0 ? 'text-[#00FFA3]' : 'text-rose-500'}`}>
               {(totalPnl as number) >= 0 ? '+' : ''}{(totalPnl as number).toFixed(4)} SOL
             </span>
           </div>
           <div className="bg-slate-900 border border-slate-800 px-4 py-2 rounded-lg flex items-center gap-3">
             <Wallet size={14} className="text-[#00FFA3]" />
-            {/* Fix: Explicitly handle balance as a number */}
             <span className="text-xs font-black text-[#00FFA3]">{(state.balance as number).toFixed(3)} SOL</span>
           </div>
         </div>
@@ -298,7 +378,6 @@ const App: React.FC = () => {
                 <div className="flex justify-between text-[10px] font-black mb-1">
                   <span className="text-[#00FFA3]">{addr.slice(0, 4)}...{addr.slice(-4)}</span>
                 </div>
-                {/* Fix: Use standard toLocaleString() to avoid multi-argument issues in strict environments */}
                 <div className="text-[11px] text-white font-bold">{(amount as number).toLocaleString()} tokens</div>
               </div>
             ))}
@@ -323,19 +402,42 @@ const App: React.FC = () => {
         {/* Main Workspace */}
         <main className="flex-1 overflow-hidden flex flex-col relative bg-black">
           {activeCount === 0 ? (
-            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center">
-               <img src={LOGO_URL} alt="Trador" className="w-24 h-24 mb-8 opacity-20 animate-pulse" />
-               <h2 className="text-2xl font-black italic tracking-tighter text-slate-700 uppercase">System Ready</h2>
-               <p className="text-[10px] text-slate-600 mt-2 uppercase tracking-[0.2em]">Deploy Contract Addresses to Initialize Grid</p>
-               <div className="mt-8 flex gap-2 md:hidden">
-                  <input 
-                    type="text" 
-                    value={caInput}
-                    onChange={(e) => setCaInput(e.target.value)}
-                    placeholder="Contract Address"
-                    className="bg-slate-900 border border-slate-800 p-2 text-xs rounded"
-                  />
-                  <button onClick={() => deployToken(caInput)} className="bg-[#00FFA3] text-black px-4 rounded font-bold text-xs">ADD</button>
+            <div className="flex-1 flex flex-col items-center justify-center p-12 text-center relative overflow-hidden">
+               {/* Background Grid Animation */}
+               <div className="absolute inset-0 bg-[url('https://grainy-gradients.vercel.app/noise.svg')] opacity-10"></div>
+               
+               <div className="relative z-10 max-w-2xl w-full">
+                 <div className="mb-8 flex flex-col items-center">
+                   <img src={LOGO_URL} alt="Trador" className="w-20 h-20 mb-6 opacity-80" />
+                   {autoMode ? (
+                     <>
+                      <h2 className="text-3xl font-black italic tracking-tighter text-[#00FFA3] uppercase neon-text animate-pulse">Auto-Pilot Engaged</h2>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Acquiring High-Liquid Targets...</p>
+                     </>
+                   ) : (
+                     <>
+                      <h2 className="text-3xl font-black italic tracking-tighter text-white uppercase neon-text">System Idle</h2>
+                      <p className="text-[10px] text-slate-500 mt-2 uppercase tracking-[0.3em]">Deploy Contracts or Enable Auto-Pilot</p>
+                     </>
+                   )}
+                 </div>
+
+                 {/* Scanner Module - Always visible but functional manually */}
+                 <div className="bg-[#0d1117] border border-slate-800 rounded-xl overflow-hidden shadow-2xl opacity-60 hover:opacity-100 transition-opacity">
+                    <div className="h-10 bg-slate-900/50 border-b border-slate-800 flex items-center justify-between px-4">
+                      <div className="flex items-center gap-2 text-[#00FFA3]">
+                         <Radar size={14} className={isScanning ? "animate-spin" : ""} />
+                         <span className="text-[10px] font-black uppercase tracking-widest">Global Market Scan</span>
+                      </div>
+                    </div>
+
+                    <div className="p-4 min-h-[100px] max-h-[200px] overflow-y-auto custom-scrollbar flex items-center justify-center">
+                         <div className="text-[10px] text-slate-600 uppercase tracking-wider flex items-center gap-2">
+                            {autoMode && <div className="w-2 h-2 bg-[#00FFA3] rounded-full animate-ping"></div>}
+                            {autoMode ? "Continuous Scanning Active" : "Waiting for manual scan"}
+                         </div>
+                    </div>
+                 </div>
                </div>
             </div>
           ) : (
@@ -344,7 +446,6 @@ const App: React.FC = () => {
               activeCount === 2 ? 'grid-cols-1 md:grid-cols-2' : 
               activeCount <= 4 ? 'grid-cols-2' : 'grid-cols-2 lg:grid-cols-3'
             }`}>
-              {/* Fix: Cast Object.values to explicit ActiveTokenState[] to fix 'unknown' inference errors */}
               {(Object.values(state.activeTokens) as ActiveTokenState[]).map((token) => {
                 const pos = state.positions[token.metadata.address] || 0;
                 const avg = state.avgEntryPrices[token.metadata.address] || 0;
@@ -382,7 +483,10 @@ const App: React.FC = () => {
                       <div className="absolute bottom-2 left-2 right-2 pointer-events-none">
                         <div className="bg-[#00FFA3] text-black p-2 rounded shadow-lg border border-white/20 pointer-events-auto">
                            <div className="flex justify-between items-center mb-1">
-                             <span className="text-[7px] font-black uppercase tracking-widest bg-black text-[#00FFA3] px-1 rounded">Algo Feed</span>
+                             <div className="flex items-center gap-1">
+                                <Zap size={8} className="text-black fill-black" />
+                                <span className="text-[7px] font-black uppercase tracking-widest bg-black text-[#00FFA3] px-1 rounded">Trador AI</span>
+                             </div>
                              <div className="flex gap-0.5">
                                {[1,2,3].map(i => <div key={i} className="w-1 h-1 bg-black/30 rounded-full animate-pulse"></div>)}
                              </div>
@@ -401,7 +505,10 @@ const App: React.FC = () => {
 
       <footer className="h-8 border-t border-slate-800/60 bg-[#0d1117] flex items-center justify-between px-6 text-[8px] font-black text-slate-500 tracking-[0.2em] uppercase">
         <div className="flex gap-6">
-          <span className="flex items-center gap-2"><div className="w-1.5 h-1.5 bg-[#00FFA3] rounded-full shadow-[0_0_5px_#00FFA3]"></div> Cluster Active</span>
+          <span className="flex items-center gap-2">
+            <div className={`w-1.5 h-1.5 rounded-full shadow-[0_0_5px] ${autoMode ? 'bg-[#00FFA3] shadow-[#00FFA3]' : 'bg-slate-500'}`}></div> 
+            Cluster {autoMode ? 'Autonomous' : 'Manual'}
+          </span>
           <span>Latency: 22ms</span>
         </div>
         <span>Trador Grid Protocol © 2025</span>
