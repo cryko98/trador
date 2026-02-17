@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw, Power, Wallet, Play, Square
+  History as HistoryIcon, XCircle, Radar, Zap, TrendingUp, TrendingDown, RotateCcw, Power, Wallet, Play, Square
 } from 'lucide-react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
@@ -33,10 +33,6 @@ const App: React.FC = () => {
   const [liveMode, setLiveMode] = useState(false); // Live vs Sim
   const [scannerResults, setScannerResults] = useState<TokenMetadata[]>([]);
   const [realWalletBalance, setRealWalletBalance] = useState<number>(0);
-
-  // Trade Filter State
-  const [tradeFilterSymbol, setTradeFilterSymbol] = useState('');
-  const [tradeFilterType, setTradeFilterType] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('trador_multi_v2');
@@ -97,7 +93,6 @@ const App: React.FC = () => {
         
         // Budget Check for Buys
         if (type === 'BUY') {
-            const currentSpent = Object.keys(stateRef.current.positions).length * (budgetRef.current / MAX_ACTIVE_TOKENS); // Approx check
             // A clearer check would be real balance, but let's trust the Swap execution to fail if insufficient funds
             if (solAmount > realWalletBalance) {
                 setSystemMessage("❌ Insufficient Wallet Balance for Trade");
@@ -202,8 +197,12 @@ const App: React.FC = () => {
     if (!targetCa || targetCa.trim().length < 32) return;
     if (stateRef.current.activeTokens[targetCa]) return;
 
-    let data = scannerResults.find(t => t.address === targetCa);
-    if (!data) data = await fetchTokenData(targetCa);
+    // Use explicit type union to handle undefined (from find) and null (from fetch)
+    let data: TokenMetadata | null | undefined = scannerResults.find(t => t.address === targetCa);
+    
+    if (!data) {
+        data = await fetchTokenData(targetCa);
+    }
 
     if (!data) {
       if (!agentActive) {
@@ -409,11 +408,8 @@ const App: React.FC = () => {
   const formattedChange = (c: number) => `${c > 0 ? '+' : ''}${c.toFixed(2)}%`;
   const formatPrice = (p: number) => p < 0.000001 ? p.toExponential(2) : p < 0.001 ? p.toFixed(6) : p.toFixed(4);
 
-  const filteredTrades = state.trades.filter(t => {
-    const matchesSymbol = t.symbol.toLowerCase().includes(tradeFilterSymbol.toLowerCase());
-    const matchesType = tradeFilterType === 'ALL' ? true : tradeFilterType === 'BUY' ? t.type === 'BUY' : (t.type === 'SELL' || t.type === 'PARTIAL_SELL');
-    return matchesSymbol && matchesType;
-  });
+  // Directly use state.trades since filters were removed to clean up code
+  const filteredTrades = state.trades;
 
   return (
     <div className="h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
