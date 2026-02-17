@@ -1,7 +1,20 @@
 
 import { GoogleGenAI, Type } from "@google/genai";
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+// Lazy initialization holder
+let aiInstance: GoogleGenAI | null = null;
+
+const getAiInstance = () => {
+  if (!aiInstance) {
+    const apiKey = process.env.API_KEY;
+    if (!apiKey) {
+      console.warn("Trador System: API Key is missing. AI commentary will be disabled.");
+      return null;
+    }
+    aiInstance = new GoogleGenAI({ apiKey });
+  }
+  return aiInstance;
+};
 
 export const getTradorCommentary = async (
   tokenName: string,
@@ -11,6 +24,12 @@ export const getTradorCommentary = async (
   balance: number
 ): Promise<{ text: string; sentiment: 'BULLISH' | 'NEUTRAL' | 'BEARISH' }> => {
   try {
+    const ai = getAiInstance();
+    // Fallback if AI cannot be initialized
+    if (!ai) {
+      return { text: "Data feed interrupted. Manual override engaged.", sentiment: "NEUTRAL" };
+    }
+
     const currentMcap = mcapHistory[mcapHistory.length - 1];
     const prevMcap = mcapHistory[mcapHistory.length - 2] || currentMcap;
     const trend = currentMcap > prevMcap ? "UPWARD" : "DOWNWARD";
@@ -28,7 +47,6 @@ export const getTradorCommentary = async (
     1. Provide 1 punchy professional commentary sentence (use degen slang sparingly like 'jeet', 'liquidity', 'rotation').
     2. Respond in a JSON format matching the schema provided.`;
 
-    // Use generateContent with responseSchema for reliable JSON responses
     const response = await ai.models.generateContent({
       model: 'gemini-3-flash-preview',
       contents: prompt,
@@ -52,7 +70,6 @@ export const getTradorCommentary = async (
       },
     });
 
-    // Access the text property directly (property, not a method)
     const result = JSON.parse(response.text || '{"text": "Scanning the order flow...", "sentiment": "NEUTRAL"}');
     return result;
   } catch (error) {
