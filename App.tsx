@@ -19,95 +19,6 @@ const MCAP_HISTORY_LIMIT = 20; // For logic calc
 const CHART_HISTORY_LIMIT = 60; // For visual chart (5 minutes approx)
 const LOGO_URL = "https://wkkeyyrknmnynlcefugq.supabase.co/storage/v1/object/public/peng/trador.png";
 
-// --- CUSTOM CHART COMPONENT ---
-const TokenChart = ({ data, trades }: { data: PricePoint[], trades: Trade[] }) => {
-  if (data.length < 2) return (
-    <div className="w-full h-full flex flex-col items-center justify-center text-xs text-slate-600 bg-black">
-      <div className="flex gap-1 mb-2">
-        {[1,2,3].map(i => <div key={i} className="w-1 h-1 bg-[#00FFA3] rounded-full animate-pulse" style={{animationDelay: `${i*150}ms`}}></div>)}
-      </div>
-      <span>AWAITING MARKET DATA</span>
-    </div>
-  );
-
-  const minPrice = Math.min(...data.map(d => d.price));
-  const maxPrice = Math.max(...data.map(d => d.price));
-  const minTime = data[0].time;
-  const maxTime = data[data.length - 1].time;
-
-  // Add 10% vertical padding
-  const yPadding = (maxPrice - minPrice) * 0.1;
-  const yMin = minPrice - yPadding;
-  const yMax = maxPrice + yPadding;
-  const yRange = yMax - yMin || 0.00000001;
-  const xRange = maxTime - minTime || 1;
-
-  const WIDTH = 1000;
-  const HEIGHT = 500;
-
-  const getX = (t: number) => ((t - minTime) / xRange) * WIDTH;
-  const getY = (p: number) => HEIGHT - ((p - yMin) / yRange) * HEIGHT;
-
-  const points = data.map(d => `${getX(d.time)},${getY(d.price)}`).join(' ');
-  const linePath = `M ${points}`;
-  const areaPath = `${linePath} L ${WIDTH},${HEIGHT} L 0,${HEIGHT} Z`;
-
-  return (
-    <div className="w-full h-full relative bg-black/50 select-none">
-       <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="w-full h-full block" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="chartGradient" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#00FFA3" stopOpacity="0.15"/>
-              <stop offset="100%" stopColor="#00FFA3" stopOpacity="0"/>
-            </linearGradient>
-            <marker id="arrowUp" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-              <path d="M3,0 L6,6 L0,6 Z" fill="#10b981" />
-            </marker>
-            <marker id="arrowDown" markerWidth="6" markerHeight="6" refX="3" refY="3" orient="auto">
-               <path d="M0,0 L6,0 L3,6 Z" fill="#f43f5e" />
-            </marker>
-          </defs>
-          
-          {/* Guide Lines */}
-          <line x1="0" y1={getY(data[0].price)} x2={WIDTH} y2={getY(data[0].price)} stroke="#334155" strokeWidth="1" strokeDasharray="4 4" opacity="0.3" />
-
-          {/* Chart Data */}
-          <path d={areaPath} fill="url(#chartGradient)" />
-          <path d={linePath} fill="none" stroke="#00FFA3" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
-
-          {/* Trade Markers */}
-          {trades.map(trade => {
-             // Show trades relevant to this chart window
-             if (trade.timestamp < minTime || trade.timestamp > maxTime) return null;
-             
-             const tx = getX(trade.timestamp);
-             const ty = getY(trade.price);
-             const isBuy = trade.type === 'BUY';
-             const color = isBuy ? '#10b981' : '#f43f5e';
-             
-             return (
-               <g key={trade.id} transform={`translate(${tx}, ${ty})`}>
-                 <line y1={0} y2={HEIGHT - ty} stroke={color} strokeWidth="1" strokeDasharray="2 2" opacity="0.5" />
-                 <circle r="4" fill={color} stroke="#000" strokeWidth="1" className="drop-shadow-lg" />
-                 <text 
-                    y={isBuy ? 15 : -10} 
-                    x={0} 
-                    textAnchor="middle" 
-                    fill={color} 
-                    fontSize="16" 
-                    fontWeight="bold" 
-                    fontFamily="monospace"
-                 >
-                    {isBuy ? "B" : "S"}
-                 </text>
-               </g>
-             );
-          })}
-       </svg>
-    </div>
-  );
-};
-
 const App: React.FC = () => {
   // Solana Wallet Hooks
   const { connection } = useConnection();
@@ -839,8 +750,13 @@ const App: React.FC = () => {
                     </div>
 
                     <div className="flex-1 bg-black relative overflow-hidden">
-                      {/* REPLACED IFRAME WITH CUSTOM TOKEN CHART */}
-                      <TokenChart data={token.priceHistory || []} trades={tokenTrades} />
+                      {/* REAL DEXSCREENER CHART */}
+                      <iframe 
+                        src={`https://dexscreener.com/solana/${token.metadata.address}?embed=1&theme=dark`}
+                        className="w-full h-full grayscale-[0.3] hover:grayscale-0 transition-all duration-500"
+                        title="DexScreener"
+                        frameBorder="0"
+                      />
                       
                       <div className="absolute top-4 right-4 z-10 flex flex-col gap-2 items-end pointer-events-none">
                          {/* Optional Floating Trade Tickers can stay if desired, but chart now has markers */}
