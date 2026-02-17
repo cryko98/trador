@@ -9,7 +9,7 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
 import { executeJupiterSwap } from './services/jupiterService';
-import { AppState, Trade, TokenMetadata, ActiveTokenState, PricePoint } from './types';
+import { AppState, Trade, TokenMetadata, ActiveTokenState } from './types';
 
 const INITIAL_SIM_BALANCE = 10; // Demo Money
 const REFRESH_INTERVAL = 5000;
@@ -774,8 +774,6 @@ const App: React.FC = () => {
                 const sells = token.metadata.txns24h?.sells || 0;
                 const totalTxns = buys + sells;
                 const buyRatio = totalTxns > 0 ? (buys / totalTxns) * 100 : 50;
-
-                const tokenTrades = state.trades.filter(t => t.address === token.metadata.address).sort((a, b) => b.timestamp - a.timestamp);
 
                 return (
                   <div key={token.metadata.address} className="bg-[#010409] flex flex-col relative group">
