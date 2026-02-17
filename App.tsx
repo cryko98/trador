@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown
+  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter
 } from 'lucide-react';
 import { fetchTokenData, fetchTrendingSolanaTokens } from './services/solanaService';
 import { getTradorCommentary } from './services/geminiService';
@@ -19,6 +19,10 @@ const App: React.FC = () => {
   const [isScanning, setIsScanning] = useState(false);
   const [autoMode, setAutoMode] = useState(true); // Auto-pilot on by default
   const [scannerResults, setScannerResults] = useState<TokenMetadata[]>([]);
+  
+  // Trade Filter State
+  const [tradeFilterSymbol, setTradeFilterSymbol] = useState('');
+  const [tradeFilterType, setTradeFilterType] = useState<'ALL' | 'BUY' | 'SELL'>('ALL');
   
   const [state, setState] = useState<AppState>(() => {
     const saved = localStorage.getItem('trador_multi_v1');
@@ -301,6 +305,17 @@ const App: React.FC = () => {
     return `${c > 0 ? '+' : ''}${c.toFixed(2)}%`;
   };
 
+  // Filter Trades
+  const filteredTrades = state.trades.filter(t => {
+    const matchesSymbol = t.symbol.toLowerCase().includes(tradeFilterSymbol.toLowerCase());
+    const matchesType = tradeFilterType === 'ALL' 
+      ? true 
+      : tradeFilterType === 'BUY' 
+        ? t.type === 'BUY' 
+        : (t.type === 'SELL' || t.type === 'PARTIAL_SELL');
+    return matchesSymbol && matchesType;
+  });
+
   return (
     <div className="min-h-screen flex flex-col bg-[#010409] text-slate-200 selection:bg-[#00FFA3] selection:text-black mono overflow-hidden relative">
       
@@ -395,17 +410,52 @@ const App: React.FC = () => {
           </div>
           
           <div className="p-4 border-t border-slate-800/60 bg-black/20">
-             <div className="flex items-center gap-2 mb-3">
-               <HistoryIcon size={12} className="text-[#00FFA3]" />
-               <span className="text-[9px] font-black text-slate-500 uppercase">Recent Global Fills</span>
+             <div className="flex items-center justify-between mb-3">
+               <div className="flex items-center gap-2">
+                 <HistoryIcon size={12} className="text-[#00FFA3]" />
+                 <span className="text-[9px] font-black text-slate-500 uppercase">Global Fills</span>
+               </div>
              </div>
+             
+             {/* Filter Controls */}
+             <div className="flex flex-col gap-2 mb-3">
+               <div className="relative">
+                 <Filter size={10} className="absolute left-2 top-1.5 text-slate-500" />
+                 <input 
+                   type="text" 
+                   placeholder="Filter Symbol..." 
+                   value={tradeFilterSymbol}
+                   onChange={(e) => setTradeFilterSymbol(e.target.value)}
+                   className="w-full bg-slate-900/50 border border-slate-800 rounded px-2 py-1 pl-6 text-[9px] text-white focus:border-[#00FFA3] outline-none placeholder:text-slate-600"
+                 />
+               </div>
+               <div className="flex gap-1">
+                 {['ALL', 'BUY', 'SELL'].map(type => (
+                   <button
+                     key={type}
+                     onClick={() => setTradeFilterType(type as any)}
+                     className={`flex-1 py-1 text-[8px] font-bold uppercase rounded border transition-colors ${
+                       tradeFilterType === type 
+                         ? 'bg-[#00FFA3]/20 border-[#00FFA3] text-[#00FFA3]' 
+                         : 'bg-slate-900 border-slate-800 text-slate-500 hover:text-slate-400'
+                     }`}
+                   >
+                     {type}
+                   </button>
+                 ))}
+               </div>
+             </div>
+
              <div className="space-y-2 max-h-48 overflow-y-auto custom-scrollbar">
-               {state.trades.slice(0, 10).map(t => (
+               {filteredTrades.slice(0, 20).map(t => (
                  <div key={t.id} className="text-[9px] flex justify-between border-b border-slate-800/30 pb-1">
-                   <span className={t.type === 'BUY' ? 'text-[#00FFA3]' : 'text-rose-500'}>{t.type} {t.symbol}</span>
+                   <span className={t.type === 'BUY' ? 'text-[#00FFA3]' : 'text-rose-500'}>{t.type === 'PARTIAL_SELL' ? 'SCALE' : t.type} {t.symbol}</span>
                    <span className="text-slate-600 font-mono">{t.solAmount.toFixed(2)}</span>
                  </div>
                ))}
+               {filteredTrades.length === 0 && (
+                   <div className="text-[9px] text-slate-600 text-center py-2 italic">No fills found</div>
+               )}
              </div>
           </div>
         </aside>
