@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { 
-  Search, Wallet, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw, Power
+  Search, History as HistoryIcon, XCircle, Radar, Bot, Zap, BarChart3, TrendingUp, TrendingDown, Filter, RotateCcw, Power
 } from 'lucide-react';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';

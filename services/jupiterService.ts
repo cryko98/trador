@@ -1,4 +1,4 @@
-import { Connection, PublicKey, VersionedTransaction } from '@solana/web3.js';
+import { Connection, VersionedTransaction } from '@solana/web3.js';
 import { Buffer } from 'buffer';
 
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
